@@ -43,14 +43,6 @@ const QUARTER_LABEL: Record<string, string> = {
   '2026Q4': '2026 Q4 (Oct–Dec)',
 };
 
-/** Quarter targets by metric (can be replaced by API). Client wins = count; ACV / in-year revenue = USD */
-const QUARTER_TARGETS: Record<QuarterId, { clientWins: number; acv: number; inYearRevenue: number }> = {
-  '2026Q1': { clientWins: 10, acv: 600000, inYearRevenue: 550000 },
-  '2026Q2': { clientWins: 12, acv: 720000, inYearRevenue: 660000 },
-  '2026Q3': { clientWins: 14, acv: 840000, inYearRevenue: 770000 },
-  '2026Q4': { clientWins: 16, acv: 960000, inYearRevenue: 880000 },
-};
-
 const PREVIOUS_QUARTERS: Record<QuarterId, QuarterId[]> = {
   '2026Q1': [],
   '2026Q2': ['2026Q1'],
@@ -117,7 +109,7 @@ type WaterfallRow = {
 };
 
 export function QuarterTab({ tabId }: QuarterTabProps) {
-  const { getQuarterDeals } = useSalesData();
+  const { getQuarterDeals, getQuarterTargets, getQuarterMetricInput } = useSalesData();
   const quarter = tabIdToQuarter(tabId);
   const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
   const [selectedOwners, setSelectedOwners] = useState<string[]>([]);
@@ -163,62 +155,91 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
 
   const waterfallData = useMemo((): WaterfallRow[] => {
     const labels = QUARTER_MONTH_LABELS[quarter];
-    const monthNums = QUARTER_MONTH_NUMS[quarter];
-    const year = 2026;
-    const monthSigned: number[] = [];
-    const monthForecasted: number[] = [];
+    const quarterMetricInput = getQuarterMetricInput(quarter, projectionMetric);
 
-    for (let i = 0; i < 3; i++) {
-      const monthNum = monthNums[i];
-      const monthPrefix = `${year}-${String(monthNum).padStart(2, '0')}`;
-      const dealsInMonth = deals.filter((d) => d.closeDate.startsWith(monthPrefix));
-      let signed = 0;
-      let forecasted = 0;
-      for (const d of dealsInMonth) {
-        const v = getMetricFromDeal(d, projectionMetric);
-        if (d.closeDate <= asOfDate) signed += v;
-        else forecasted += v;
+    let monthSigned: number[];
+    let monthForecasted: number[];
+    let targetValue: number;
+    let effectiveCarryOver: number;
+
+    if (quarterMetricInput) {
+      monthSigned = quarterMetricInput.monthSigned;
+      monthForecasted = quarterMetricInput.monthForecasted;
+      effectiveCarryOver = quarterMetricInput.carryOver ?? 0;
+      targetValue =
+        quarterMetricInput.quarterTarget > 0
+          ? projectionMetric === 'clientWins'
+            ? Math.round(quarterMetricInput.quarterTarget)
+            : Math.round(quarterMetricInput.quarterTarget / 1000) * 1000
+          : (() => {
+              const targets = getQuarterTargets(quarter);
+              return projectionMetric === 'clientWins'
+                ? targets.clientWins
+                : projectionMetric === 'acv'
+                  ? targets.acv
+                  : targets.inYearRevenue;
+            })();
+    } else {
+      effectiveCarryOver = carryOver;
+      const monthNums = QUARTER_MONTH_NUMS[quarter];
+      const year = 2026;
+      monthSigned = [];
+      monthForecasted = [];
+
+      for (let i = 0; i < 3; i++) {
+        const monthNum = monthNums[i];
+        const monthPrefix = `${year}-${String(monthNum).padStart(2, '0')}`;
+        const dealsInMonth = deals.filter((d) => d.closeDate.startsWith(monthPrefix));
+        let signed = 0;
+        let forecasted = 0;
+        for (const d of dealsInMonth) {
+          const v = getMetricFromDeal(d, projectionMetric);
+          if (d.closeDate <= asOfDate) signed += v;
+          else forecasted += v;
+        }
+        monthSigned.push(signed);
+        monthForecasted.push(forecasted);
       }
-      monthSigned.push(signed);
-      monthForecasted.push(forecasted);
+
+      const quarterTotalProjected =
+        monthSigned[0] + monthSigned[1] + monthSigned[2] + monthForecasted[0] + monthForecasted[1] + monthForecasted[2];
+      const allDealsQuarterTotal = allDeals.reduce(
+        (s, d) => s + getMetricFromDeal(d, projectionMetric),
+        0
+      );
+      const targets = getQuarterTargets(quarter);
+      const fullTarget =
+        projectionMetric === 'clientWins'
+          ? targets.clientWins
+          : projectionMetric === 'acv'
+            ? targets.acv
+            : targets.inYearRevenue;
+      targetValue =
+        allDealsQuarterTotal > 0 && (selectedSegments.length > 0 || selectedOwners.length > 0)
+          ? fullTarget * (quarterTotalProjected / allDealsQuarterTotal)
+          : fullTarget;
+      if (projectionMetric === 'clientWins') {
+        targetValue = Math.round(targetValue);
+      } else {
+        targetValue = Math.round(targetValue / 1000) * 1000;
+      }
     }
 
     const totalSigned = monthSigned[0] + monthSigned[1] + monthSigned[2];
     const totalForecasted = monthForecasted[0] + monthForecasted[1] + monthForecasted[2];
-    const quarterTotalProjected = totalSigned + totalForecasted;
-    const allDealsQuarterTotal = allDeals.reduce(
-      (s, d) => s + getMetricFromDeal(d, projectionMetric),
-      0
-    );
-    const targets = QUARTER_TARGETS[quarter];
-    const fullTarget =
-      projectionMetric === 'clientWins'
-        ? targets.clientWins
-        : projectionMetric === 'acv'
-          ? targets.acv
-          : targets.inYearRevenue;
-    let targetValue =
-      allDealsQuarterTotal > 0 && (selectedSegments.length > 0 || selectedOwners.length > 0)
-        ? fullTarget * (quarterTotalProjected / allDealsQuarterTotal)
-        : fullTarget;
-    if (projectionMetric === 'clientWins') {
-      targetValue = Math.round(targetValue);
-    } else {
-      targetValue = Math.round(targetValue / 1000) * 1000;
-    }
     const targetLabel = quarter === '2026Q1' ? 'Q1 Target' : `${quarter} Target`;
 
     const rows: WaterfallRow[] = [];
     let running = 0;
 
-    if (quarter !== '2026Q1' && carryOver > 0) {
-      rows.push({ name: 'Carry-over', baseline: 0, signed: carryOver, forecasted: 0, isTotal: false });
-      running = carryOver;
+    if (quarter !== '2026Q1') {
+      rows.push({ name: 'Carry-over', baseline: 0, signed: effectiveCarryOver, forecasted: 0, isTotal: false });
+      running = effectiveCarryOver;
     }
 
     for (let i = 0; i < 3; i++) {
-      const signed = monthSigned[i];
-      const forecasted = monthForecasted[i];
+      const signed = monthSigned[i] ?? 0;
+      const forecasted = monthForecasted[i] ?? 0;
       rows.push({ name: labels[i], baseline: running, signed, forecasted, isTotal: false });
       running += signed + forecasted;
     }
@@ -250,6 +271,8 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
     projectionMetric,
     asOfDate,
     carryOver,
+    getQuarterMetricInput,
+    getQuarterTargets,
   ]);
 
   const chartData = useMemo(() => {
@@ -304,6 +327,7 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
     return max > 0 ? max : 1;
   }, [waterfallData]);
 
+  /** Show label on Forecasted bar – only when forecasted > 0 so label sits on top of stack; when forecasted is 0 the label is shown on the Signed bar instead. */
   const renderWaterfallLabel = (props: {
     x?: number;
     y?: number;
@@ -315,6 +339,7 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
     const { x = 0, y = 0, width = 0, index = 0, payload } = props;
     const row = payload ?? waterfallData[index];
     if (row?.isTarget) return null;
+    if (row && row.forecasted === 0) return null;
     const total = row ? getWaterfallRowValue(row) : 0;
     const displayValue = row ? formatProjectionValue(total) : '';
     if (!row || total === 0) return null;
@@ -330,6 +355,23 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
         {displayValue}
       </text>
     );
+  };
+
+  /** Show label on Signed bar only when forecasted is 0 (e.g. Carry-over) so label is visible for zero-height forecasted segment. */
+  const renderWaterfallLabelSignedOnly = (props: {
+    x?: number;
+    y?: number;
+    width?: number;
+    value?: number;
+    index?: number;
+    payload?: WaterfallRow;
+  }) => {
+    const { payload } = props;
+    const row = payload;
+    if (!row || row.isTarget || (row.signed === 0 || row.forecasted !== 0)) return null;
+    const total = row.signed + row.forecasted;
+    if (total === 0) return null;
+    return renderWaterfallLabel(props);
   };
 
   const renderTargetLabel = (props: {
@@ -461,7 +503,9 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                 )}
               />
               <Bar dataKey="baseline" name="baseline" stackId="wf" fill="transparent" radius={[0, 0, 0, 0]} legendType="none" />
-              <Bar dataKey="signed" name="Signed" stackId="wf" fill="var(--sales-chart-1)" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="signed" name="Signed" stackId="wf" fill="var(--sales-chart-1)" radius={[0, 0, 0, 0]}>
+                <LabelList content={renderWaterfallLabelSignedOnly as any} position="top" />
+              </Bar>
               <Bar dataKey="forecasted" name="Forecasted" stackId="wf" fill="var(--sales-chart-3)" radius={[4, 4, 0, 0]}>
                 <LabelList content={renderWaterfallLabel as any} position="top" />
               </Bar>

@@ -38,6 +38,11 @@ export interface SalesKPIs {
   pipelineValueDelta?: number;
   closedWonDelta?: number;
   winRateDelta?: number;
+  /** Annual targets from sheet (optional). Used in cumulative vs target charts. */
+  annualARRTarget?: number;
+  annualACVTarget?: number;
+  annualInYearRevenueTarget?: number;
+  annualClientWinsTarget?: number;
 }
 
 function randomInRange(min: number, max: number): number {

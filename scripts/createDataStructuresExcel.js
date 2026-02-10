@@ -57,17 +57,31 @@ const instructionsRows = [
   ['Sheet names the dashboard expects (use exact names):'],
   ['SalesKPIs, ForecastPoint, ForecastPointBySegment, PipelineStage, DealSegment,'],
   ['ARRByMonthPoint, ARR_LicenseDetail, ARR_MinimumDetail, ARR_VolumeDetail,'],
-  ['PipelineDeal, ACVByMonth, ClientWinsPoint, ClientDeal, QuarterDeal'],
+  ['PipelineDeal, ACVByMonth, ClientWinsPoint, ClientDeal, QuarterDeal, QuarterTargets (optional), CumulativeChartData (optional)'],
   [''],
   ['Key sheets for Overview: SalesKPIs, ARRByMonthPoint, PipelineDeal, ClientWinsPoint.'],
   ['PipelineDeal.stage drives "Pipeline by deal stage"; segment drives "Deal distribution by segment".'],
+  [''],
+  ['TARGETS (optional):'],
+  ['• SalesKPIs: add columns annualARRTarget, annualACVTarget, annualInYearRevenueTarget, annualClientWinsTarget'],
+  ['  for the "Cumulative Actual/Forecast vs Target" chart (linear target). One row of KPIs.'],
+  ['• QuarterTargets: optional sheet with columns quarter, clientWins, acv, inYearRevenue.'],
+  ['  One row per quarter (e.g. 2026Q1–Q4). Used in Quarter tab waterfall.'],
+  ['• CumulativeChartData: optional sheet. Columns: metric, type, Jan, Feb, … Dec.'],
+  ['  Rows: one per metric × type (e.g. ACV Actual, ACV Forecast, ACV Target, In-year rev Actual, …).'],
+  ['  Values = cumulative to end of that month. Lets you use a non-linear target ramp. Set GID to use.'],
+  [''],
+  ['QUARTER INPUT (optional – metric × status grid with carry-over from Q2):'],
+  ['• QuarterMetricInput: quarter, metric (Client wins, ACV signed, In-year revenue), status (Forecasted, Signed, Target),'],
+  ['  segment, deal_owner (for filters; leave blank for all), carry_over (0 for Q1; from Q2 use value from prior quarter(s)),'],
+  ['  month1, month2, month3 (Jan–Mar for Q1; Apr–Jun for Q2; Jul–Sep for Q3; Oct–Dec for Q4), total_projected, quarter_target.'],
 ];
 addSheetFromRows(workbook, 'Instructions', instructionsRows);
 
 // ---- Reference sheet: type name, where used, fields ----
 const referenceRows = [
   ['Data Type', 'Used In', 'Field Names / Notes'],
-  ['SalesKPIs', 'Overview – KPI cards (Forecast Y-E ARR, Closed-Won, Pipeline Value)', 'forecastARR, pipelineValue, closedWon, winRate, forecastARRDelta?, pipelineValueDelta?, closedWonDelta?, winRateDelta?'],
+  ['SalesKPIs', 'Overview – KPI cards + optional annual targets for cumulative chart', 'forecastARR, pipelineValue, closedWon, winRate, forecastARRDelta?, pipelineValueDelta?, closedWonDelta?, winRateDelta?, annualARRTarget?, annualACVTarget?, annualInYearRevenueTarget?, annualClientWinsTarget?'],
   ['ForecastPoint', 'Optional – aggregated forecast over time', 'month, forecast, target'],
   ['ForecastPointBySegment', 'Optional – forecast by segment (for segment filter)', 'month, segment, forecast, target'],
   ['PipelineStage', 'Optional – pipeline totals by stage (name, value, count)', 'name, value, count'],
@@ -81,13 +95,16 @@ const referenceRows = [
   ['ClientWinsPoint', 'Overview cumulative chart (Client wins metric) + Pipeline tab', 'period (e.g. Jan 2026), wins'],
   ['ClientDeal', 'Accounts tab – table', 'id, dealName, closeDate (YYYY-MM-DD), segment, acv, estimatedTransactionsPerMonth, dealOwner'],
   ['QuarterDeal', 'Quarter tabs – table & chart', 'id, clientName, dealName, closeDate, segment, acv, arrForecast, annualizedTransactionForecast, dealOwner, targetAccount (true/false), latestNextSteps, confidenceQuarterClose (0-100)'],
+  ['QuarterTargets', 'Optional – Quarter tab waterfall target bar', 'quarter (2026Q1, 2026Q2, 2026Q3, 2026Q4), clientWins (count), acv ($), inYearRevenue ($)'],
+  ['CumulativeChartData', 'Optional – Cumulative Actual/Forecast vs Target chart (non-linear target)', 'metric (ACV, In-year rev, ARR, Client wins), type (Actual, Forecast, Target), Jan, Feb, … Dec (cumulative values)'],
+  ['QuarterMetricInput', 'Optional – Quarter tab input: metric × status grid; use segment & deal_owner to filter', 'quarter, metric (Client wins, ACV signed, In-year revenue), status (Forecasted, Signed, Target), segment?, deal_owner?, carry_over (0 for Q1), month1, month2, month3, total_projected, quarter_target'],
   ['', '', ''],
   ['Segment values (for segment field):', '', SEGMENT_OPTIONS.join(' | ')],
   ['Stage values (for PipelineDeal.stage):', '', 'Qualification, Discovery, Proposal, Negotiation, Closed Won'],
 ];
 addSheetFromRows(workbook, 'Reference', referenceRows);
 
-// ---- SalesKPIs (single row) ----
+// ---- SalesKPIs (single row; optional annual target columns for cumulative chart) ----
 addSheet(workbook, 'SalesKPIs', [
   {
     forecastARR: 2840000,
@@ -98,6 +115,10 @@ addSheet(workbook, 'SalesKPIs', [
     pipelineValueDelta: -2.1,
     closedWonDelta: 1,
     winRateDelta: 2.5,
+    annualARRTarget: 2900000,
+    annualACVTarget: 3200000,
+    annualInYearRevenueTarget: 2800000,
+    annualClientWinsTarget: 52,
   },
 ]);
 
@@ -199,6 +220,79 @@ addSheet(workbook, 'ClientDeal', [
 addSheet(workbook, 'QuarterDeal', [
   { id: 'q1-1', clientName: 'Acme Corp', dealName: 'Acme Corp – Platform', closeDate: '2026-02-14', segment: 'Fintechs', acv: 180000, arrForecast: 165000, annualizedTransactionForecast: 120000, dealOwner: 'Jordan Smith', targetAccount: true, latestNextSteps: 'Follow-up call scheduled.', confidenceQuarterClose: 85 },
   { id: 'q1-2', clientName: 'Beta Inc', dealName: 'Beta Inc – Enterprise', closeDate: '2026-03-05', segment: 'Bank & Bank Tech', acv: 95000, arrForecast: 88000, annualizedTransactionForecast: 80000, dealOwner: 'Alex Morgan', targetAccount: false, latestNextSteps: 'Demo completed. Sending proposal.', confidenceQuarterClose: 70 },
+]);
+
+// ---- QuarterTargets (optional – target bar in Quarter tab waterfall) ----
+addSheet(workbook, 'QuarterTargets', [
+  { quarter: '2026Q1', clientWins: 10, acv: 600000, inYearRevenue: 550000 },
+  { quarter: '2026Q2', clientWins: 12, acv: 720000, inYearRevenue: 660000 },
+  { quarter: '2026Q3', clientWins: 14, acv: 840000, inYearRevenue: 770000 },
+  { quarter: '2026Q4', clientWins: 16, acv: 960000, inYearRevenue: 880000 },
+]);
+
+// ---- CumulativeChartData (optional – cumulative chart with non-linear target; columns: metric, type, Jan..Dec) ----
+const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function cumRow(metric, type, values) {
+  const row = { metric, type };
+  months.forEach((m, i) => { row[m] = values[i] ?? 0; });
+  return row;
+}
+addSheet(workbook, 'CumulativeChartData', [
+  cumRow('ACV', 'Actual', [100000, 250000, 400000, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  cumRow('ACV', 'Forecast', [100000, 250000, 400000, 550000, 720000, 900000, 1100000, 1320000, 1560000, 1820000, 2100000, 2400000]),
+  cumRow('ACV', 'Target', [200000, 450000, 750000, 1100000, 1500000, 1950000, 2450000, 2780000, 2980000, 3100000, 3170000, 3200000]),
+  cumRow('In-year rev', 'Actual', [80000, 200000, 320000, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  cumRow('In-year rev', 'Forecast', [80000, 200000, 320000, 450000, 600000, 760000, 940000, 1140000, 1360000, 1600000, 1860000, 2150000]),
+  cumRow('In-year rev', 'Target', [180000, 380000, 600000, 840000, 1100000, 1380000, 1680000, 2000000, 2340000, 2600000, 2720000, 2800000]),
+  cumRow('ARR', 'Actual', [220000, 450000, 680000, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  cumRow('ARR', 'Forecast', [220000, 450000, 680000, 920000, 1180000, 1450000, 1750000, 2080000, 2420000, 2620000, 2760000, 2900000]),
+  cumRow('ARR', 'Target', [220000, 460000, 720000, 1000000, 1300000, 1620000, 1960000, 2320000, 2580000, 2720000, 2820000, 2900000]),
+  cumRow('Client wins', 'Actual', [3, 8, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+  cumRow('Client wins', 'Forecast', [3, 8, 12, 18, 25, 33, 42, 46, 49, 51, 52, 52]),
+  cumRow('Client wins', 'Target', [4, 10, 18, 28, 36, 42, 46, 49, 50, 51, 52, 52]),
+]);
+
+// ---- QuarterMetricInput (optional – quarterly metric × status input; Q1 no carry-over, Q2+ has carry_over; segment & deal_owner for filters) ----
+// Columns: quarter, metric, status, segment, deal_owner, carry_over, month1, month2, month3, total_projected, quarter_target
+// Leave segment and deal_owner blank for rollup (all); fill them to filter by segment and/or deal owner in the dashboard.
+// Q1: month1=Jan, month2=Feb, month3=Mar. Q2: month1=Apr, month2=May, month3=Jun. Q3: Jul,Aug,Sep. Q4: Oct,Nov,Dec.
+addSheet(workbook, 'QuarterMetricInput', [
+  { quarter: '2026Q1', metric: 'Client wins', status: 'Forecasted', segment: '', deal_owner: '', carry_over: 0, month1: 2, month2: 3, month3: 4, total_projected: 9, quarter_target: 10 },
+  { quarter: '2026Q1', metric: 'Client wins', status: 'Signed', segment: '', deal_owner: '', carry_over: 0, month1: 1, month2: 2, month3: 1, total_projected: 4, quarter_target: 10 },
+  { quarter: '2026Q1', metric: 'Client wins', status: 'Target', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 0, month3: 0, total_projected: 0, quarter_target: 10 },
+  { quarter: '2026Q1', metric: 'ACV signed', status: 'Forecasted', segment: '', deal_owner: '', carry_over: 0, month1: 120000, month2: 180000, month3: 95000, total_projected: 395000, quarter_target: 600000 },
+  { quarter: '2026Q1', metric: 'ACV signed', status: 'Signed', segment: '', deal_owner: '', carry_over: 0, month1: 80000, month2: 100000, month3: 50000, total_projected: 230000, quarter_target: 600000 },
+  { quarter: '2026Q1', metric: 'ACV signed', status: 'Target', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 0, month3: 0, total_projected: 0, quarter_target: 600000 },
+  { quarter: '2026Q1', metric: 'In-year revenue', status: 'Forecasted', segment: '', deal_owner: '', carry_over: 0, month1: 110000, month2: 165000, month3: 88000, total_projected: 363000, quarter_target: 550000 },
+  { quarter: '2026Q1', metric: 'In-year revenue', status: 'Signed', segment: '', deal_owner: '', carry_over: 0, month1: 70000, month2: 95000, month3: 45000, total_projected: 210000, quarter_target: 550000 },
+  { quarter: '2026Q1', metric: 'In-year revenue', status: 'Target', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 0, month3: 0, total_projected: 0, quarter_target: 550000 },
+  { quarter: '2026Q2', metric: 'Client wins', status: 'Forecasted', segment: '', deal_owner: '', carry_over: 4, month1: 3, month2: 2, month3: 3, total_projected: 12, quarter_target: 12 },
+  { quarter: '2026Q2', metric: 'Client wins', status: 'Signed', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 1, month3: 2, total_projected: 3, quarter_target: 12 },
+  { quarter: '2026Q2', metric: 'Client wins', status: 'Target', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 0, month3: 0, total_projected: 0, quarter_target: 12 },
+  { quarter: '2026Q2', metric: 'ACV signed', status: 'Forecasted', segment: '', deal_owner: '', carry_over: 230000, month1: 150000, month2: 200000, month3: 170000, total_projected: 750000, quarter_target: 720000 },
+  { quarter: '2026Q2', metric: 'ACV signed', status: 'Signed', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 80000, month3: 120000, total_projected: 200000, quarter_target: 720000 },
+  { quarter: '2026Q2', metric: 'ACV signed', status: 'Target', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 0, month3: 0, total_projected: 0, quarter_target: 720000 },
+  { quarter: '2026Q2', metric: 'In-year revenue', status: 'Forecasted', segment: '', deal_owner: '', carry_over: 210000, month1: 140000, month2: 180000, month3: 130000, total_projected: 660000, quarter_target: 660000 },
+  { quarter: '2026Q2', metric: 'In-year revenue', status: 'Signed', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 70000, month3: 105000, total_projected: 175000, quarter_target: 660000 },
+  { quarter: '2026Q1', metric: 'ACV signed', status: 'Signed', segment: 'Bank & Bank Tech', deal_owner: 'Alex Morgan', carry_over: 0, month1: 50000, month2: 50000, month3: 25000, total_projected: 125000, quarter_target: 600000 },
+  { quarter: '2026Q3', metric: 'Client wins', status: 'Forecasted', segment: '', deal_owner: '', carry_over: 7, month1: 3, month2: 4, month3: 3, total_projected: 17, quarter_target: 14 },
+  { quarter: '2026Q3', metric: 'Client wins', status: 'Signed', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 2, month3: 2, total_projected: 4, quarter_target: 14 },
+  { quarter: '2026Q3', metric: 'Client wins', status: 'Target', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 0, month3: 0, total_projected: 0, quarter_target: 14 },
+  { quarter: '2026Q3', metric: 'ACV signed', status: 'Forecasted', segment: '', deal_owner: '', carry_over: 430000, month1: 180000, month2: 220000, month3: 200000, total_projected: 1030000, quarter_target: 840000 },
+  { quarter: '2026Q3', metric: 'ACV signed', status: 'Signed', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 100000, month3: 150000, total_projected: 250000, quarter_target: 840000 },
+  { quarter: '2026Q3', metric: 'ACV signed', status: 'Target', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 0, month3: 0, total_projected: 0, quarter_target: 840000 },
+  { quarter: '2026Q3', metric: 'In-year revenue', status: 'Forecasted', segment: '', deal_owner: '', carry_over: 385000, month1: 160000, month2: 200000, month3: 185000, total_projected: 930000, quarter_target: 770000 },
+  { quarter: '2026Q3', metric: 'In-year revenue', status: 'Signed', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 90000, month3: 120000, total_projected: 210000, quarter_target: 770000 },
+  { quarter: '2026Q3', metric: 'In-year revenue', status: 'Target', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 0, month3: 0, total_projected: 0, quarter_target: 770000 },
+  { quarter: '2026Q4', metric: 'Client wins', status: 'Forecasted', segment: '', deal_owner: '', carry_over: 11, month1: 4, month2: 4, month3: 5, total_projected: 24, quarter_target: 16 },
+  { quarter: '2026Q4', metric: 'Client wins', status: 'Signed', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 1, month3: 3, total_projected: 4, quarter_target: 16 },
+  { quarter: '2026Q4', metric: 'Client wins', status: 'Target', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 0, month3: 0, total_projected: 0, quarter_target: 16 },
+  { quarter: '2026Q4', metric: 'ACV signed', status: 'Forecasted', segment: '', deal_owner: '', carry_over: 680000, month1: 220000, month2: 260000, month3: 280000, total_projected: 1440000, quarter_target: 960000 },
+  { quarter: '2026Q4', metric: 'ACV signed', status: 'Signed', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 120000, month3: 180000, total_projected: 300000, quarter_target: 960000 },
+  { quarter: '2026Q4', metric: 'ACV signed', status: 'Target', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 0, month3: 0, total_projected: 0, quarter_target: 960000 },
+  { quarter: '2026Q4', metric: 'In-year revenue', status: 'Forecasted', segment: '', deal_owner: '', carry_over: 595000, month1: 200000, month2: 240000, month3: 265000, total_projected: 1300000, quarter_target: 880000 },
+  { quarter: '2026Q4', metric: 'In-year revenue', status: 'Signed', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 110000, month3: 140000, total_projected: 250000, quarter_target: 880000 },
+  { quarter: '2026Q4', metric: 'In-year revenue', status: 'Target', segment: '', deal_owner: '', carry_over: 0, month1: 0, month2: 0, month3: 0, total_projected: 0, quarter_target: 880000 },
 ]);
 
 try {

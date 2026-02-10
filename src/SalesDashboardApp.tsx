@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSalesData } from './contexts/SalesDataContext';
 import { Sidebar, type SalesTabId } from './components/sales/Sidebar';
 import { OverviewTab } from './components/sales/OverviewTab';
 import { ForecastTab } from './components/sales/ForecastTab';
@@ -8,6 +9,8 @@ import { QuarterTab } from './components/sales/QuarterTab';
 
 function SalesDashboardApp() {
   const [activeTab, setActiveTab] = useState<SalesTabId>('overview');
+  const { refetch, loading, useApi, useGoogleSheets } = useSalesData();
+  const showRefresh = useApi || useGoogleSheets;
 
   return (
     <div className="sales-app">
@@ -22,6 +25,17 @@ function SalesDashboardApp() {
         {activeTab === '2026q3' && <QuarterTab tabId="2026q3" />}
         {activeTab === '2026q4' && <QuarterTab tabId="2026q4" />}
       </main>
+      {showRefresh && (
+        <button
+          type="button"
+          className="sales-refresh-data-btn"
+          onClick={() => refetch()}
+          disabled={loading}
+          title="Reload data from Google Sheets"
+        >
+          {loading ? 'Loading…' : 'Refresh data'}
+        </button>
+      )}
     </div>
   );
 }

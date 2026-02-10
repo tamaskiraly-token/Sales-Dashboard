@@ -7,7 +7,11 @@ import {
   type ReactNode,
 } from 'react';
 import { loadGoogleSheetsData, isGoogleSheetsConfigured } from '../data/googleSheetsLoader';
-import type { LoadedSalesData } from '../data/googleSheetsLoader';
+import type {
+  LoadedSalesData,
+  CumulativeChartMetricKey,
+  QuarterProjectionMetricKey,
+} from '../data/googleSheetsLoader';
 import { loadApiData, isApiConfigured } from '../data/apiLoader';
 import {
   getSalesKPIs,
@@ -24,6 +28,24 @@ import {
 } from '../data/salesMockData';
 import type { QuarterId } from '../data/salesMockData';
 
+/** Annual targets for cumulative vs target chart. Used when not provided by sheet. */
+const DEFAULT_ANNUAL_TARGETS = {
+  acv: 3_200_000,
+  inYearRevenue: 2_800_000,
+  arrTarget: 2_900_000,
+  clientWins: 52,
+} as const;
+
+/** Quarter targets for quarter waterfall. Used when QuarterTargets sheet not provided. */
+const DEFAULT_QUARTER_TARGETS: Record<QuarterId, { clientWins: number; acv: number; inYearRevenue: number }> = {
+  '2026Q1': { clientWins: 10, acv: 600000, inYearRevenue: 550000 },
+  '2026Q2': { clientWins: 12, acv: 720000, inYearRevenue: 660000 },
+  '2026Q3': { clientWins: 14, acv: 840000, inYearRevenue: 770000 },
+  '2026Q4': { clientWins: 16, acv: 960000, inYearRevenue: 880000 },
+};
+
+export type AnnualTargets = { acv: number; inYearRevenue: number; arrTarget: number; clientWins: number };
+
 type SalesDataContextValue = {
   /** When true, SQL API is configured and we're loading or using it */
   useApi: boolean;
@@ -33,6 +55,8 @@ type SalesDataContextValue = {
   googleData: LoadedSalesData | null;
   loading: boolean;
   error: string | null;
+  /** Reload data from API or Google Sheets (no-op when using mock) */
+  refetch: () => void;
   /** Use these getters; they return Google data when available, else mock */
   getKPIs: () => ReturnType<typeof getSalesKPIs>;
   getForecastLine: (selectedSegments?: string[]) => ReturnType<typeof getForecastOverTime>;
@@ -45,6 +69,14 @@ type SalesDataContextValue = {
   getClientWins: () => ReturnType<typeof getClientWinsOverTime>;
   getClientDealsList: () => ReturnType<typeof getClientDeals>;
   getQuarterDeals: (quarter: QuarterId) => ReturnType<typeof getDealsByQuarter>;
+  /** Annual targets for cumulative chart (from SalesKPIs sheet or defaults) */
+  getAnnualTargets: () => AnnualTargets;
+  /** Quarter targets for quarter tab waterfall (from QuarterTargets sheet or defaults) */
+  getQuarterTargets: (quarter: QuarterId) => { clientWins: number; acv: number; inYearRevenue: number };
+  /** Cumulative chart: Actual/Forecast/Target per month from CumulativeChartData sheet, or null to use computed + linear target */
+  getCumulativeChartData: (metric: CumulativeChartMetricKey) => { actual: number[]; forecast: number[]; target: number[] } | null;
+  /** Quarter waterfall: Signed/Forecasted per month from QuarterMetricInput sheet, or null to use deal-based logic */
+  getQuarterMetricInput: (quarter: QuarterId, metric: QuarterProjectionMetricKey) => { monthSigned: number[]; monthForecasted: number[]; quarterTarget: number; carryOver: number } | null;
 };
 
 const SalesDataContext = createContext<SalesDataContextValue | null>(null);
@@ -53,10 +85,11 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
   const [googleData, setGoogleData] = useState<LoadedSalesData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const useApi = isApiConfigured();
-  const useGoogleSheets = !useApi && isGoogleSheetsConfigured();
+  /* Prefer Google Sheets when configured; use API only when Sheets is not configured */
+  const useGoogleSheets = isGoogleSheetsConfigured();
+  const useApi = !useGoogleSheets && isApiConfigured();
 
-  useEffect(() => {
+  const loadData = useCallback(() => {
     if (useApi) {
       setLoading(true);
       setError(null);
@@ -66,14 +99,19 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
         .finally(() => setLoading(false));
       return;
     }
-    if (!useGoogleSheets) return;
-    setLoading(true);
-    setError(null);
-    loadGoogleSheetsData()
-      .then(setGoogleData)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
+    if (useGoogleSheets) {
+      setLoading(true);
+      setError(null);
+      loadGoogleSheetsData()
+        .then(setGoogleData)
+        .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+        .finally(() => setLoading(false));
+    }
   }, [useApi, useGoogleSheets]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const getKPIs = useCallback(() => {
     if (googleData?.salesKPIs) return googleData.salesKPIs;
@@ -82,7 +120,7 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
 
   const getForecastLine = useCallback(
     (selectedSegments?: string[]) => {
-      if (googleData && googleData.forecastPointBySegment.length > 0 && selectedSegments?.length) {
+      if (googleData && selectedSegments?.length) {
         const filtered = googleData.forecastPointBySegment.filter((r) =>
           selectedSegments.includes(r.segment)
         );
@@ -99,20 +137,20 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
           target: cur.target,
         }));
       }
-      if (googleData && googleData.forecastPoint.length > 0) return googleData.forecastPoint;
+      if (googleData) return googleData.forecastPoint;
       return getForecastOverTime(selectedSegments);
     },
     [googleData]
   );
 
   const getPipelineStages = useCallback(() => {
-    if (googleData && googleData.pipelineStage.length > 0) return googleData.pipelineStage;
+    if (googleData) return googleData.pipelineStage;
     return getPipelineByStage();
   }, [googleData]);
 
   const getDealDist = useCallback(
     (selectedSegments?: string[]) => {
-      if (googleData && googleData.dealSegment.length > 0) {
+      if (googleData) {
         const segs = selectedSegments;
         const list =
           segs && segs.length > 0
@@ -129,7 +167,7 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
   );
 
   const getForecastARR = useCallback(() => {
-    if (googleData && googleData.arrByMonthPoint.length > 0) {
+    if (googleData) {
       return {
         chartData: googleData.arrByMonthPoint,
         detailsByMonth: googleData.detailsByMonth ?? {},
@@ -139,13 +177,13 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
   }, [googleData]);
 
   const getPipelineDeals = useCallback(() => {
-    if (googleData && googleData.pipelineDeal.length > 0) return googleData.pipelineDeal;
+    if (googleData) return googleData.pipelineDeal;
     return getPipelineDeals2026();
   }, [googleData]);
 
   const getACVByMonth = useCallback(
     (deals: ReturnType<typeof getPipelineDeals2026>) => {
-      if (googleData && googleData.acvByMonth.length > 0) return googleData.acvByMonth;
+      if (googleData) return googleData.acvByMonth;
       return getACVByMonth2026(deals);
     },
     [googleData]
@@ -157,18 +195,18 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
   );
 
   const getClientWins = useCallback(() => {
-    if (googleData && googleData.clientWinsPoint.length > 0) return googleData.clientWinsPoint;
+    if (googleData) return googleData.clientWinsPoint;
     return getClientWinsOverTime();
   }, [googleData]);
 
   const getClientDealsList = useCallback(() => {
-    if (googleData && googleData.clientDeal.length > 0) return googleData.clientDeal;
+    if (googleData) return googleData.clientDeal;
     return getClientDeals();
   }, [googleData]);
 
   const getQuarterDeals = useCallback(
     (quarter: QuarterId) => {
-      if (googleData && googleData.quarterDeal.length > 0) {
+      if (googleData) {
         const quarterMonths: Record<QuarterId, number[]> = {
           '2026Q1': [1, 2, 3],
           '2026Q2': [4, 5, 6],
@@ -186,12 +224,62 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
     [googleData]
   );
 
+  const getAnnualTargets = useCallback((): AnnualTargets => {
+    const kpis = googleData?.salesKPIs;
+    return {
+      acv: (kpis?.annualACVTarget && kpis.annualACVTarget > 0) ? kpis.annualACVTarget : DEFAULT_ANNUAL_TARGETS.acv,
+      inYearRevenue: (kpis?.annualInYearRevenueTarget && kpis.annualInYearRevenueTarget > 0) ? kpis.annualInYearRevenueTarget : DEFAULT_ANNUAL_TARGETS.inYearRevenue,
+      arrTarget: (kpis?.annualARRTarget && kpis.annualARRTarget > 0) ? kpis.annualARRTarget : DEFAULT_ANNUAL_TARGETS.arrTarget,
+      clientWins: (kpis?.annualClientWinsTarget && kpis.annualClientWinsTarget > 0) ? kpis.annualClientWinsTarget : DEFAULT_ANNUAL_TARGETS.clientWins,
+    };
+  }, [googleData]);
+
+  const getQuarterTargets = useCallback(
+    (quarter: QuarterId): { clientWins: number; acv: number; inYearRevenue: number } => {
+      const fromSheet = googleData?.quarterTargets?.[quarter];
+      if (fromSheet && (fromSheet.clientWins > 0 || fromSheet.acv > 0 || fromSheet.inYearRevenue > 0)) {
+        return fromSheet;
+      }
+      return DEFAULT_QUARTER_TARGETS[quarter];
+    },
+    [googleData]
+  );
+
+  const getCumulativeChartData = useCallback(
+    (metric: CumulativeChartMetricKey): { actual: number[]; forecast: number[]; target: number[] } | null => {
+      const data = googleData?.cumulativeChartData?.[metric];
+      if (!data || !data.actual?.length) return null;
+      return {
+        actual: data.actual.length >= 12 ? data.actual.slice(0, 12) : [...data.actual, ...new Array(12 - data.actual.length).fill(0)],
+        forecast: data.forecast?.length >= 12 ? data.forecast.slice(0, 12) : (data.forecast ? [...data.forecast, ...new Array(12 - data.forecast.length).fill(0)] : new Array(12).fill(0)),
+        target: data.target?.length >= 12 ? data.target.slice(0, 12) : (data.target ? [...data.target, ...new Array(12 - data.target.length).fill(0)] : new Array(12).fill(0)),
+      };
+    },
+    [googleData]
+  );
+
+  const getQuarterMetricInput = useCallback(
+    (quarter: QuarterId, metric: QuarterProjectionMetricKey): { monthSigned: number[]; monthForecasted: number[]; quarterTarget: number; carryOver: number } | null => {
+      const byQuarter = googleData?.quarterMetricInput?.[quarter];
+      const byMetric = byQuarter?.[metric];
+      if (!byMetric) return null;
+      return {
+        monthSigned: byMetric.monthSigned.slice(0, 3),
+        monthForecasted: byMetric.monthForecasted.slice(0, 3),
+        quarterTarget: byMetric.quarterTarget,
+        carryOver: byMetric.carryOver ?? 0,
+      };
+    },
+    [googleData]
+  );
+
   const value: SalesDataContextValue = {
     useApi,
     useGoogleSheets,
     googleData,
     loading,
     error,
+    refetch: loadData,
     getKPIs,
     getForecastLine,
     getPipelineStages,
@@ -203,6 +291,10 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
     getClientWins,
     getClientDealsList,
     getQuarterDeals,
+    getAnnualTargets,
+    getQuarterTargets,
+    getCumulativeChartData,
+    getQuarterMetricInput,
   };
 
   return (

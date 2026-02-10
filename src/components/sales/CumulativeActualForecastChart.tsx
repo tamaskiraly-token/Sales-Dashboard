@@ -17,13 +17,6 @@ const MONTHS_2026 = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
 
 type CumulativeMetric = 'acv' | 'inYearRevenue' | 'arrTarget' | 'clientWins';
 
-const ANNUAL_TARGETS: Record<CumulativeMetric, number> = {
-  acv: 3_200_000,
-  inYearRevenue: 2_800_000,
-  arrTarget: 2_900_000,
-  clientWins: 52,
-};
-
 function getAsOfMonth(): number {
   const d = new Date();
   return d.getFullYear() === 2026 ? d.getMonth() + 1 : 2;
@@ -37,17 +30,41 @@ function formatAxisValue(value: number, isCurrency: boolean): string {
 }
 
 export function CumulativeActualForecastChart() {
-  const { getPipelineDeals, getForecastARR, getClientWins } = useSalesData();
+  const { getPipelineDeals, getForecastARR, getClientWins, getAnnualTargets, getCumulativeChartData } = useSalesData();
   const [metric, setMetric] = useState<CumulativeMetric>('acv');
 
   const asOfMonth = useMemo(() => getAsOfMonth(), []);
+  const annualTargets = useMemo(() => getAnnualTargets(), [getAnnualTargets]);
+  const sheetData = useMemo(() => getCumulativeChartData(metric), [getCumulativeChartData, metric]);
 
   const chartData = useMemo(() => {
+    const rows: {
+      month: string;
+      monthIndex: number;
+      targetCumulative: number;
+      actualCumulative: number | null;
+      forecastCumulative: number | null;
+    }[] = [];
+
+    if (sheetData) {
+      for (let i = 0; i < 12; i++) {
+        const isActualPeriod = i + 1 <= asOfMonth;
+        rows.push({
+          month: MONTHS_2026[i],
+          monthIndex: i + 1,
+          targetCumulative: sheetData.target[i] ?? 0,
+          actualCumulative: isActualPeriod ? (sheetData.actual[i] ?? null) : null,
+          forecastCumulative: i + 1 >= asOfMonth ? (sheetData.forecast[i] ?? null) : null,
+        });
+      }
+      return rows;
+    }
+
     const pipelineDeals = getPipelineDeals();
     const { chartData: arrByMonth } = getForecastARR();
     const clientWinsPoints = getClientWins();
     const year = 2026;
-    const annualTarget = ANNUAL_TARGETS[metric];
+    const annualTarget = annualTargets[metric];
 
     const targetCumulativeByMonth: number[] = [];
     for (let m = 1; m <= 12; m++) {
@@ -98,13 +115,6 @@ export function CumulativeActualForecastChart() {
 
     let actualCum = 0;
     let forecastCum = 0;
-    const rows: {
-      month: string;
-      monthIndex: number;
-      targetCumulative: number;
-      actualCumulative: number | null;
-      forecastCumulative: number | null;
-    }[] = [];
 
     for (let i = 0; i < 12; i++) {
       const isActualPeriod = i + 1 <= asOfMonth;
@@ -124,7 +134,7 @@ export function CumulativeActualForecastChart() {
     }
 
     return rows;
-  }, [getPipelineDeals, getForecastARR, getClientWins, metric, asOfMonth]);
+  }, [sheetData, metric, asOfMonth, getPipelineDeals, getForecastARR, getClientWins, getAnnualTargets, annualTargets]);
 
   const isCurrency = metric !== 'clientWins';
   const formatAxis = (v: number) => formatAxisValue(v, isCurrency);
@@ -144,7 +154,9 @@ export function CumulativeActualForecastChart() {
         <div>
           <h3 className="sales-chart-title">Cumulative {metricLabel} vs target</h3>
           <p className="sales-chart-sub">
-            Target line = cumulative annual target. Actual (solid) to latest period; Forecast (dashed) to Dec.
+            {sheetData
+              ? 'Data from CumulativeChartData sheet. Target can be non-linear. Actual (solid) to latest period; Forecast (dashed) to Dec.'
+              : 'Target line = cumulative annual target. Actual (solid) to latest period; Forecast (dashed) to Dec.'}
           </p>
         </div>
         <div className="sales-view-switch">

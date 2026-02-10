@@ -22,8 +22,13 @@ interface SalesKPIs {
   winRate: number;               // percentage (e.g. 34 for 34%)
   forecastARRDelta?: number;     // % change
   pipelineValueDelta?: number;   // % change
-  closedWonDelta?: number;       // count change
-  winRateDelta?: number;         // percentage point change
+  closedWonDelta?: number;      // count change
+  winRateDelta?: number;        // percentage point change
+  // Optional: annual targets for "Cumulative Actual/Forecast vs Target" chart
+  annualARRTarget?: number;      // $
+  annualACVTarget?: number;     // $
+  annualInYearRevenueTarget?: number;  // $
+  annualClientWinsTarget?: number;     // count
 }
 ```
 
@@ -372,6 +377,83 @@ interface QuarterDeal {
 
 ---
 
+### 5.1 Quarter targets (optional sheet)
+
+**Type:** one row per quarter  
+**Used by:** Quarter tab – target bar in the waterfall chart.
+
+```ts
+// Sheet name: QuarterTargets
+// Columns: quarter, clientWins, acv, inYearRevenue
+{ quarter: '2026Q1', clientWins: 10, acv: 600000, inYearRevenue: 550000 }
+{ quarter: '2026Q2', clientWins: 12, acv: 720000, inYearRevenue: 660000 }
+{ quarter: '2026Q3', clientWins: 14, acv: 840000, inYearRevenue: 770000 }
+{ quarter: '2026Q4', clientWins: 16, acv: 960000, inYearRevenue: 880000 }
+```
+
+If you don’t use a QuarterTargets sheet, the dashboard uses built-in default targets. Set the sheet’s GID in `googleSheetsConfig.sheetGids.QuarterTargets` to use your own.
+
+---
+
+### 5.2 Cumulative chart from sheet (optional)
+
+**Sheet name:** `CumulativeChartData`  
+**Used by:** Overview – "Cumulative Actual/Forecast vs Target" chart when you want **per-month** Actual, Forecast, and **non-linear Target** from a grid.
+
+**Layout:** Columns = `metric`, `type`, `Jan`, `Feb`, … `Dec`. One row per (metric × type). Values are **cumulative to end of that month**.
+
+- **metric:** `ACV` | `In-year rev` or `In-year revenue` | `ARR` or `ARR target` | `Client wins`
+- **type:** `Actual` | `Forecast` | `Target`
+- **Jan … Dec:** numbers (cumulative for that month)
+
+**Example (ACV – non-linear target ramp):**
+
+| metric | type    | Jan   | Feb   | Mar   | … | Dec    |
+|--------|---------|-------|-------|-------|---|--------|
+| ACV    | Actual  | 100000| 250000| 400000| … |        |
+| ACV    | Forecast| 100000| 250000| 400000| … | 2400000|
+| ACV    | Target  | 200000| 450000| 750000| … | 3200000|
+
+If you don't use this sheet (or leave its GID empty), the chart uses deal-derived Actual/Forecast and a **linear** target from SalesKPIs annual targets. Set `googleSheetsConfig.sheetGids.CumulativeChartData` to the sheet's GID to use your grid.
+
+---
+
+### 5.3 Quarter metric input (optional – metric × status grid with carry-over and filters)
+
+**Sheet name:** `QuarterMetricInput`  
+**Used by:** Quarter tabs – input data in a grid format (metric × status × months), with **carry-over from Q2 onwards** and **segment** / **deal_owner** columns so you can filter the quarter view by segment and deal owner.
+
+**Columns:**
+
+| Column | Description |
+|--------|-------------|
+| quarter | `2026Q1` \| `2026Q2` \| `2026Q3` \| `2026Q4` |
+| metric | `Client wins` \| `ACV signed` \| `In-year revenue` |
+| status | `Forecasted` \| `Signed` \| `Target` |
+| segment | Optional. Leave **blank** for rollup (all segments); use e.g. `Bank & Bank Tech` to filter. |
+| deal_owner | Optional. Leave **blank** for all owners; use e.g. `Alex Morgan` to filter. |
+| carry_over | For **Q1**: use `0`. For **Q2+**: value carried from previous quarter(s). |
+| month1, month2, month3 | Q1: Jan, Feb, Mar. Q2: Apr, May, Jun. Q3: Jul, Aug, Sep. Q4: Oct, Nov, Dec. |
+| total_projected | Total projected for the quarter (e.g. month1 + month2 + month3 + carry_over for forecast). |
+| quarter_target | Target for that quarter (e.g. Q1 Target, Q2 Target). |
+
+**Example (Q1 – no carry-over):**
+
+| quarter | metric | status | segment | deal_owner | carry_over | month1 | month2 | month3 | total_projected | quarter_target |
+|---------|--------|--------|---------|------------|------------|--------|--------|--------|-----------------|----------------|
+| 2026Q1 | Client wins | Forecasted | | | 0 | 2 | 3 | 4 | 9 | 10 |
+| 2026Q1 | ACV signed | Signed | | | 0 | 80000 | 100000 | 50000 | 230000 | 600000 |
+
+**Example (Q2 – with carry-over):**
+
+| quarter | metric | status | segment | deal_owner | carry_over | month1 | month2 | month3 | total_projected | quarter_target |
+|---------|--------|--------|---------|------------|------------|--------|--------|--------|-----------------|----------------|
+| 2026Q2 | ACV signed | Forecasted | | | 230000 | 150000 | 200000 | 170000 | 750000 | 720000 |
+
+Use one row per (quarter, metric, status). Add extra rows with **segment** and/or **deal_owner** filled to support filtering by segment and deal owner in the Quarter tab. The dashboard will use this sheet when its GID is set in config (and when the app is wired to read it).
+
+---
+
 ## Quick reference: where to plug in your data
 
 | Tab / chart              | Data type(s)              | File / function to replace or feed |
@@ -385,5 +467,11 @@ interface QuarterDeal {
 | Pipeline – Client wins   | `ClientWinsPoint[]`        | `getClientWinsOverTime()`           |
 | Accounts – Table         | `ClientDeal[]`            | `getClientDeals()`                  |
 | Quarter – Table + chart  | `QuarterDeal[]`           | `getDealsByQuarter(quarter)`        |
+| Overview – Cumulative vs target | `SalesKPIs` annual* columns | `getAnnualTargets()` (from SalesKPIs or defaults) |
+| Quarter – Target bar    | `QuarterTargets` sheet   | `getQuarterTargets(quarter)`        |
+| Overview – Cumulative vs target (from sheet) | `CumulativeChartData` sheet | `getCumulativeChartData(metric)` (metric = acv, inYearRevenue, arrTarget, clientWins) |
+| Quarter – metric × status input (optional) | `QuarterMetricInput` sheet | quarter, metric, status, segment, deal_owner, carry_over, month1–3, total_projected, quarter_target |
 
-All of these are in `src/data/salesMockData.ts`. You can replace the mock functions with your own data loaders (e.g. API calls) that return the same shapes above.
+\* SalesKPIs optional columns: `annualARRTarget`, `annualACVTarget`, `annualInYearRevenueTarget`, `annualClientWinsTarget`.
+
+All of these are in `src/data/salesMockData.ts` or loaded from Google Sheets. You can replace the mock functions with your own data loaders (e.g. API calls) that return the same shapes above.

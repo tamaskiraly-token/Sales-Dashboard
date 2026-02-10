@@ -921,3 +921,38 @@
   letter-spacing: -0.02em;
   margin-top: 2px;
 }
+
+/* Refresh data button – bottom left */
+.sales-refresh-data-btn {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 100;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--sales-text);
+  background: var(--sales-bg-card);
+  border: 1px solid var(--sales-border);
+  border-radius: var(--sales-radius);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.sales-refresh-data-btn:hover:not(:disabled) {
+  background: var(--sales-bg);
+  border-color: var(--sales-primary);
+  color: var(--sales-primary);
+}
+
+.sales-refresh-data-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .sales-refresh-data-btn {
+    bottom: 16px;
+    left: 16px;
+  }
+}

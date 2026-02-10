@@ -29,16 +29,60 @@ function buildUrl(spreadsheetId: string, gid: string): string {
   return BASE.replace('SPREADSHEET_ID', spreadsheetId).replace('GID', gid);
 }
 
+/** Normalize header for matching: lowercase, no spaces/underscores (e.g. "Deal Name" -> "dealname") */
+function normalizeHeader(h: string): string {
+  return h
+    .trim()
+    .replace(/^"|"$/g, '')
+    .toLowerCase()
+    .replace(/[\s_]+/g, '');
+}
+
+/** Parse one CSV line respecting quoted fields (handles commas inside "...") */
+function parseCSVLine(line: string): string[] {
+  const out: string[] = [];
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] === '"') {
+      let val = '';
+      i += 1;
+      while (i < line.length) {
+        if (line[i] === '"') {
+          i += 1;
+          if (line[i] === '"') {
+            val += '"';
+            i += 1;
+          } else break;
+        } else {
+          val += line[i];
+          i += 1;
+        }
+      }
+      out.push(val.trim());
+    } else {
+      let val = '';
+      while (i < line.length && line[i] !== ',') {
+        val += line[i];
+        i += 1;
+      }
+      out.push(val.trim().replace(/^"|"$/g, ''));
+      i += 1;
+    }
+  }
+  return out;
+}
+
 function parseCSV(csv: string): Record<string, string>[] {
-  const lines = csv.trim().split(/\r?\n/);
+  const lines = csv.trim().split(/\r?\n/).filter((l) => l.length > 0);
   if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
+  const rawHeaders = parseCSVLine(lines[0]);
+  const headers = rawHeaders.map((h) => normalizeHeader(h) || h);
   const rows: Record<string, string>[] = [];
   for (let i = 1; i < lines.length; i++) {
-    const values = lines[i].split(',').map((v) => v.trim().replace(/^"|"$/g, ''));
+    const values = parseCSVLine(lines[i]);
     const row: Record<string, string> = {};
     headers.forEach((h, j) => {
-      row[h] = values[j] ?? '';
+      row[h] = (values[j] ?? '').trim().replace(/^"|"$/g, '');
     });
     rows.push(row);
   }
@@ -55,35 +99,42 @@ function bool(v: string): boolean {
   return s === 'true' || s === '1' || s === 'yes' || s === 'x';
 }
 
+/** Read cell with flexible header matching (e.g. "Deal Name" or "dealName" -> dealName) */
+function cell(row: Record<string, string>, key: string): string {
+  const normalized = normalizeHeader(key);
+  return row[normalized] ?? row[key] ?? '';
+}
+
 function buildDetailsByMonth(
   lic: Record<string, string>[],
   min: Record<string, string>[],
   vol: Record<string, string>[]
 ): Record<string, import('./salesMockData').ARRMonthDetail> {
+  const monthVal = (r: Record<string, string>) => String((cell(r, 'month') || r.month) ?? '');
   const months = new Set<string>([
-    ...lic.map((r) => String(r.month ?? '')),
-    ...min.map((r) => String(r.month ?? '')),
-    ...vol.map((r) => String(r.month ?? '')),
+    ...lic.map(monthVal),
+    ...min.map(monthVal),
+    ...vol.map(monthVal),
   ].filter(Boolean));
   const out: Record<string, import('./salesMockData').ARRMonthDetail> = {};
   for (const month of months) {
     out[month] = {
-      license: lic.filter((r) => (r.month ?? '') === month).map((r) => ({
-        clientName: String(r.clientName ?? ''),
-        amount: num(r.amount),
-        segment: String(r.segment ?? ''),
+      license: lic.filter((r) => monthVal(r) === month).map((r) => ({
+        clientName: String((cell(r, 'clientName') || r.clientName) ?? ''),
+        amount: num(cell(r, 'amount') || r.amount),
+        segment: String((cell(r, 'segment') || r.segment) ?? ''),
       })),
-      minimum: min.filter((r) => (r.month ?? '') === month).map((r) => ({
-        clientName: String(r.clientName ?? ''),
-        amount: num(r.amount),
-        segment: String(r.segment ?? ''),
+      minimum: min.filter((r) => monthVal(r) === month).map((r) => ({
+        clientName: String((cell(r, 'clientName') || r.clientName) ?? ''),
+        amount: num(cell(r, 'amount') || r.amount),
+        segment: String((cell(r, 'segment') || r.segment) ?? ''),
       })),
-      volumeDriven: vol.filter((r) => (r.month ?? '') === month).map((r) => ({
-        clientName: String(r.clientName ?? ''),
-        transactions: num(r.transactions),
-        pricePoint: num(r.pricePoint),
-        amount: num(r.amount),
-        segment: String(r.segment ?? ''),
+      volumeDriven: vol.filter((r) => monthVal(r) === month).map((r) => ({
+        clientName: String((cell(r, 'clientName') || r.clientName) ?? ''),
+        transactions: num(cell(r, 'transactions') || r.transactions),
+        pricePoint: num(cell(r, 'pricePoint') || r.pricePoint),
+        amount: num(cell(r, 'amount') || r.amount),
+        segment: String((cell(r, 'segment') || r.segment) ?? ''),
       })),
     };
   }
@@ -94,11 +145,41 @@ async function fetchSheet(name: string): Promise<Record<string, string>[]> {
   const gid = googleSheetsConfig.sheetGids[name];
   if (!gid || !googleSheetsConfig.spreadsheetId) return [];
   const url = buildUrl(googleSheetsConfig.spreadsheetId, gid);
-  const res = await fetch(url);
+  const cacheBust = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+  const res = await fetch(cacheBust, { cache: 'no-store' });
   if (!res.ok) throw new Error(`Failed to fetch ${name}: ${res.status}`);
   const text = await res.text();
   return parseCSV(text);
 }
+
+/** Fetch a sheet but return [] on failure (for optional sheets like QuarterTargets) */
+async function fetchSheetOptional(name: string): Promise<Record<string, string>[]> {
+  try {
+    return await fetchSheet(name);
+  } catch {
+    return [];
+  }
+}
+
+/** Per-quarter targets (client wins count, ACV, in-year revenue). Keys e.g. 2026Q1 */
+export type LoadedQuarterTargets = Record<string, { clientWins: number; acv: number; inYearRevenue: number }>;
+
+/** Metric keys for the cumulative chart (matches CumulativeActualForecastChart) */
+export type CumulativeChartMetricKey = 'acv' | 'inYearRevenue' | 'arrTarget' | 'clientWins';
+
+/** Per-month (Jan..Dec) cumulative values for Actual, Forecast, Target. From optional CumulativeChartData sheet. */
+export type LoadedCumulativeChartData = Partial<
+  Record<CumulativeChartMetricKey, { actual: number[]; forecast: number[]; target: number[] }>
+>;
+
+/** Metric keys for quarter waterfall (Client wins, ACV, In-year revenue). */
+export type QuarterProjectionMetricKey = 'clientWins' | 'acv' | 'inYearRevenue';
+
+/** Per-quarter, per-metric: Signed/Forecasted from QuarterMetricInput sheet (month1–3, quarter_target, carry_over). */
+export type LoadedQuarterMetricInput = Record<
+  string,
+  Partial<Record<QuarterProjectionMetricKey, { monthSigned: number[]; monthForecasted: number[]; quarterTarget: number; carryOver: number }>>
+>;
 
 export interface LoadedSalesData {
   salesKPIs: SalesKPIs | null;
@@ -113,6 +194,12 @@ export interface LoadedSalesData {
   clientWinsPoint: ClientWinsPoint[];
   clientDeal: ClientDeal[];
   quarterDeal: QuarterDeal[];
+  /** From optional QuarterTargets sheet; empty if not configured. API may omit. */
+  quarterTargets?: LoadedQuarterTargets;
+  /** From optional CumulativeChartData sheet (rows: metric, type, Jan..Dec). API may omit. */
+  cumulativeChartData?: LoadedCumulativeChartData;
+  /** From optional QuarterMetricInput sheet (quarter, metric, status, month1–3, total_projected, quarter_target). API may omit. */
+  quarterMetricInput?: LoadedQuarterMetricInput;
 }
 
 export async function loadGoogleSheetsData(): Promise<LoadedSalesData> {
@@ -122,12 +209,14 @@ export async function loadGoogleSheetsData(): Promise<LoadedSalesData> {
   const sheet = async (name: string) => {
     try {
       return await fetchSheet(name);
-    } catch {
-      return [];
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[Google Sheets] Failed to load sheet "${name}":`, msg);
+      throw new Error(`Could not load sheet "${name}". ${msg} Make sure the sheet is shared (Anyone with the link can view) and the spreadsheet ID / sheet GID match your workbook.`);
     }
   };
 
-  const [salesKPIsRows, forecastPointRows, forecastBySegRows, pipelineStageRows, dealSegRows, arrByMonthRows, arrLicRows, arrMinRows, arrVolRows, pipelineDealRows, acvRows, clientWinsRows, clientDealRows, quarterDealRows] = await Promise.all([
+  const [salesKPIsRows, forecastPointRows, forecastBySegRows, pipelineStageRows, dealSegRows, arrByMonthRows, arrLicRows, arrMinRows, arrVolRows, pipelineDealRows, acvRows, clientWinsRows, clientDealRows, quarterDealRows, quarterTargetsRows, cumulativeChartRows, quarterMetricInputRows] = await Promise.all([
     sheet('SalesKPIs'),
     sheet('ForecastPoint'),
     sheet('ForecastPointBySegment'),
@@ -142,92 +231,195 @@ export async function loadGoogleSheetsData(): Promise<LoadedSalesData> {
     sheet('ClientWinsPoint'),
     sheet('ClientDeal'),
     sheet('QuarterDeal'),
+    googleSheetsConfig.sheetGids['QuarterTargets']
+      ? fetchSheetOptional('QuarterTargets')
+      : Promise.resolve([]),
+    googleSheetsConfig.sheetGids['CumulativeChartData']
+      ? fetchSheetOptional('CumulativeChartData')
+      : Promise.resolve([]),
+    googleSheetsConfig.sheetGids['QuarterMetricInput']
+      ? fetchSheetOptional('QuarterMetricInput')
+      : Promise.resolve([]),
   ]);
 
   const salesKPIs: SalesKPIs | null =
     salesKPIsRows.length > 0
-      ? {
-          forecastARR: num(salesKPIsRows[0].forecastARR),
-          pipelineValue: num(salesKPIsRows[0].pipelineValue),
-          closedWon: num(salesKPIsRows[0].closedWon),
-          winRate: num(salesKPIsRows[0].winRate),
-          forecastARRDelta: salesKPIsRows[0].forecastARRDelta ? num(salesKPIsRows[0].forecastARRDelta) : undefined,
-          pipelineValueDelta: salesKPIsRows[0].pipelineValueDelta ? num(salesKPIsRows[0].pipelineValueDelta) : undefined,
-          closedWonDelta: salesKPIsRows[0].closedWonDelta ? num(salesKPIsRows[0].closedWonDelta) : undefined,
-          winRateDelta: salesKPIsRows[0].winRateDelta ? num(salesKPIsRows[0].winRateDelta) : undefined,
-        }
+      ? (() => {
+          const r = salesKPIsRows[0];
+          const arrTarget = num(cell(r, 'annualARRTarget'));
+          const acvTarget = num(cell(r, 'annualACVTarget'));
+          const inYearTarget = num(cell(r, 'annualInYearRevenueTarget'));
+          const winsTarget = num(cell(r, 'annualClientWinsTarget'));
+          return {
+            forecastARR: num(cell(r, 'forecastARR')),
+            pipelineValue: num(cell(r, 'pipelineValue')),
+            closedWon: num(cell(r, 'closedWon')),
+            winRate: num(cell(r, 'winRate')),
+            forecastARRDelta: cell(r, 'forecastARRDelta') ? num(cell(r, 'forecastARRDelta')) : undefined,
+            pipelineValueDelta: cell(r, 'pipelineValueDelta') ? num(cell(r, 'pipelineValueDelta')) : undefined,
+            closedWonDelta: cell(r, 'closedWonDelta') ? num(cell(r, 'closedWonDelta')) : undefined,
+            winRateDelta: cell(r, 'winRateDelta') ? num(cell(r, 'winRateDelta')) : undefined,
+            annualARRTarget: arrTarget > 0 ? arrTarget : undefined,
+            annualACVTarget: acvTarget > 0 ? acvTarget : undefined,
+            annualInYearRevenueTarget: inYearTarget > 0 ? inYearTarget : undefined,
+            annualClientWinsTarget: winsTarget > 0 ? winsTarget : undefined,
+          };
+        })()
       : null;
 
   return {
     salesKPIs,
     forecastPoint: forecastPointRows.map((r) => ({
-      month: String(r.month ?? ''),
-      forecast: num(r.forecast),
-      target: num(r.target),
+      month: String((cell(r, 'month') || r.month) ?? ''),
+      forecast: num(cell(r, 'forecast') || r.forecast),
+      target: num(cell(r, 'target') || r.target),
     })),
     forecastPointBySegment: forecastBySegRows.map((r) => ({
-      month: String(r.month ?? ''),
-      segment: String(r.segment ?? ''),
-      forecast: num(r.forecast),
-      target: num(r.target),
+      month: String((cell(r, 'month') || r.month) ?? ''),
+      segment: String((cell(r, 'segment') || r.segment) ?? ''),
+      forecast: num(cell(r, 'forecast') || r.forecast),
+      target: num(cell(r, 'target') || r.target),
     })),
     pipelineStage: pipelineStageRows.map((r) => ({
-      name: String(r.name ?? ''),
-      value: num(r.value),
-      count: num(r.count),
+      name: String((cell(r, 'name') || r.name) ?? ''),
+      value: num(cell(r, 'value') || r.value),
+      count: num(cell(r, 'count') || r.count),
     })),
     dealSegment: dealSegRows.map((r) => ({
-      name: String(r.name ?? ''),
-      value: num(r.value),
-      fill: String(r.fill ?? '#1e1b4b'),
+      name: String((cell(r, 'name') || r.name) ?? ''),
+      value: num(cell(r, 'value') || r.value),
+      fill: String((cell(r, 'fill') || r.fill) ?? '#1e1b4b'),
     })),
     arrByMonthPoint: arrByMonthRows.map((r) => ({
-      month: String(r.month ?? ''),
-      license: num(r.license),
-      minimum: num(r.minimum),
-      volumeDriven: num(r.volumeDriven),
+      month: String((cell(r, 'month') || r.month) ?? ''),
+      license: num(cell(r, 'license') || r.license),
+      minimum: num(cell(r, 'minimum') || r.minimum),
+      volumeDriven: num(cell(r, 'volumeDriven') || r.volumeDriven),
     })),
     detailsByMonth: buildDetailsByMonth(arrLicRows, arrMinRows, arrVolRows),
     pipelineDeal: pipelineDealRows.map((r) => ({
-      id: String(r.id ?? ''),
-      name: String(r.name ?? ''),
-      acv: num(r.acv),
-      closeDate: String(r.closeDate ?? ''),
-      stage: r.stage ? String(r.stage) : undefined,
-      segment: String(r.segment ?? ''),
+      id: String((cell(r, 'id') || r.id) ?? ''),
+      name: String((cell(r, 'name') || r.name) ?? ''),
+      acv: num(cell(r, 'acv') || r.acv),
+      closeDate: String((cell(r, 'closeDate') || r.closeDate) ?? ''),
+      stage: (cell(r, 'stage') || r.stage) ? String(cell(r, 'stage') || r.stage) : undefined,
+      segment: String((cell(r, 'segment') || r.segment) ?? ''),
     })),
     acvByMonth: acvRows.map((r) => ({
-      month: String(r.month ?? ''),
-      monthKey: String(r.monthKey ?? ''),
-      totalACV: num(r.totalACV),
+      month: String((cell(r, 'month') || r.month) ?? ''),
+      monthKey: String((cell(r, 'monthKey') || r.monthKey) ?? ''),
+      totalACV: num(cell(r, 'totalACV') || r.totalACV),
     })),
     clientWinsPoint: clientWinsRows.map((r) => ({
-      period: String(r.period ?? ''),
-      wins: num(r.wins),
+      period: String((cell(r, 'period') || r.period) ?? ''),
+      wins: num(cell(r, 'wins') || r.wins),
     })),
     clientDeal: clientDealRows.map((r) => ({
-      id: String(r.id ?? ''),
-      dealName: String(r.dealName ?? ''),
-      closeDate: String(r.closeDate ?? ''),
-      segment: String(r.segment ?? ''),
-      acv: num(r.acv),
-      estimatedTransactionsPerMonth: num(r.estimatedTransactionsPerMonth),
-      dealOwner: String(r.dealOwner ?? ''),
+      id: String((cell(r, 'id') || r.id) ?? ''),
+      dealName: String((cell(r, 'dealName') || r.dealName) ?? ''),
+      closeDate: String((cell(r, 'closeDate') || r.closeDate) ?? ''),
+      segment: String((cell(r, 'segment') || r.segment) ?? ''),
+      acv: num(cell(r, 'acv') || r.acv),
+      estimatedTransactionsPerMonth: num(cell(r, 'estimatedTransactionsPerMonth') || r.estimatedTransactionsPerMonth),
+      dealOwner: String((cell(r, 'dealOwner') || r.dealOwner) ?? ''),
     })),
     quarterDeal: quarterDealRows.map((r) => ({
-      id: String(r.id ?? ''),
-      clientName: String(r.clientName ?? ''),
-      dealName: String(r.dealName ?? ''),
-      closeDate: String(r.closeDate ?? ''),
-      segment: String(r.segment ?? ''),
-      acv: num(r.acv),
-      arrForecast: num(r.arrForecast),
-      annualizedTransactionForecast: num(r.annualizedTransactionForecast),
-      dealOwner: String(r.dealOwner ?? ''),
-      targetAccount: bool(r.targetAccount),
-      latestNextSteps: String(r.latestNextSteps ?? ''),
-      confidenceQuarterClose: num(r.confidenceQuarterClose),
+      id: String((cell(r, 'id') || r.id) ?? ''),
+      clientName: String((cell(r, 'clientName') || r.clientName) ?? ''),
+      dealName: String((cell(r, 'dealName') || r.dealName) ?? ''),
+      closeDate: String((cell(r, 'closeDate') || r.closeDate) ?? ''),
+      segment: String((cell(r, 'segment') || r.segment) ?? ''),
+      acv: num(cell(r, 'acv') || r.acv),
+      arrForecast: num(cell(r, 'arrForecast') || r.arrForecast),
+      annualizedTransactionForecast: num(cell(r, 'annualizedTransactionForecast') || r.annualizedTransactionForecast),
+      dealOwner: String((cell(r, 'dealOwner') || r.dealOwner) ?? ''),
+      targetAccount: bool(cell(r, 'targetAccount') || r.targetAccount),
+      latestNextSteps: String((cell(r, 'latestNextSteps') || r.latestNextSteps) ?? ''),
+      confidenceQuarterClose: num(cell(r, 'confidenceQuarterClose') || r.confidenceQuarterClose),
     })),
+    quarterTargets: (() => {
+      const map: LoadedQuarterTargets = {};
+      for (const r of quarterTargetsRows) {
+        const q = String(((cell(r, 'quarter') || r.quarter) ?? '').trim()).toUpperCase();
+        if (!q) continue;
+        map[q] = {
+          clientWins: num(cell(r, 'clientWins') || r.clientWins),
+          acv: num(cell(r, 'acv') || r.acv),
+          inYearRevenue: num(cell(r, 'inYearRevenue') || r.inYearRevenue),
+        };
+      }
+      return map;
+    })(),
+    cumulativeChartData: (() => {
+      const MONTH_COLS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+      const metricNorm: Record<string, CumulativeChartMetricKey> = {
+        acv: 'acv',
+        'inyearrev': 'inYearRevenue',
+        'inyearrevenue': 'inYearRevenue',
+        arr: 'arrTarget',
+        'arrtarget': 'arrTarget',
+        clientwins: 'clientWins',
+      };
+      const typeNorm: Record<string, 'actual' | 'forecast' | 'target'> = {
+        actual: 'actual',
+        forecast: 'forecast',
+        target: 'target',
+      };
+      const out: LoadedCumulativeChartData = {};
+      for (const r of cumulativeChartRows) {
+        const metricRaw = String(((cell(r, 'metric') || r.metric) ?? '').trim()).toLowerCase().replace(/\s+/g, '');
+        const typeRaw = String(((cell(r, 'type') || r.type) ?? '').trim()).toLowerCase();
+        const metricKey = metricNorm[metricRaw] ?? (metricRaw === 'acv' ? 'acv' : null);
+        const typeKey = typeNorm[typeRaw];
+        if (!metricKey || !typeKey) continue;
+        const values = MONTH_COLS.map((col) => num(cell(r, col) || (r as Record<string, string>)[col]));
+        if (!out[metricKey]) {
+          out[metricKey] = { actual: new Array(12).fill(0), forecast: new Array(12).fill(0), target: new Array(12).fill(0) };
+        }
+        out[metricKey]![typeKey] = values;
+      }
+      return Object.keys(out).length > 0 ? out : undefined;
+    })(),
+    quarterMetricInput: (() => {
+      const metricNorm: Record<string, QuarterProjectionMetricKey> = {
+        'clientwins': 'clientWins',
+        'client wins': 'clientWins',
+        acv: 'acv',
+        'inyearrevenue': 'inYearRevenue',
+        'in-year revenue': 'inYearRevenue',
+        'in year revenue': 'inYearRevenue',
+      };
+      const out: LoadedQuarterMetricInput = {};
+      for (const r of quarterMetricInputRows) {
+        const qRaw = String(((cell(r, 'quarter') || r.quarter) ?? '').trim()).toUpperCase();
+        if (!qRaw || !/^20\d{2}Q[1-4]$/.test(qRaw)) continue;
+        const metricRaw = String(((cell(r, 'metric') || r.metric) ?? '').trim()).toLowerCase();
+        const metricKey = metricNorm[metricRaw] ?? metricNorm[metricRaw.replace(/-/g, ' ')];
+        if (!metricKey) continue;
+        if (!out[qRaw]) out[qRaw] = {};
+        if (!out[qRaw][metricKey]) {
+          out[qRaw][metricKey] = { monthSigned: [0, 0, 0], monthForecasted: [0, 0, 0], quarterTarget: 0, carryOver: 0 };
+        }
+        const status = String((cell(r, 'status') || r.status) ?? '').trim().toLowerCase();
+        const m1 = num(cell(r, 'month1') || r.month1);
+        const m2 = num(cell(r, 'month2') || r.month2);
+        const m3 = num(cell(r, 'month3') || r.month3);
+        const qt = num(cell(r, 'quarter_target') || r.quarter_target);
+        const co = num(cell(r, 'carry_over') || r.carry_over);
+        if (status === 'signed') {
+          out[qRaw][metricKey]!.monthSigned[0] += m1;
+          out[qRaw][metricKey]!.monthSigned[1] += m2;
+          out[qRaw][metricKey]!.monthSigned[2] += m3;
+        } else if (status === 'forecasted') {
+          out[qRaw][metricKey]!.monthForecasted[0] += m1;
+          out[qRaw][metricKey]!.monthForecasted[1] += m2;
+          out[qRaw][metricKey]!.monthForecasted[2] += m3;
+        }
+        if (qt > 0) out[qRaw][metricKey]!.quarterTarget = qt;
+        if (co > 0) out[qRaw][metricKey]!.carryOver = co;
+      }
+      return Object.keys(out).length > 0 ? out : undefined;
+    })(),
   };
 }
 
