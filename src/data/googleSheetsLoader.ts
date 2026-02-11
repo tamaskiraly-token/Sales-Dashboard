@@ -73,10 +73,10 @@ function parseCSVLine(line: string): string[] {
 }
 
 function parseCSV(csv: string): Record<string, string>[] {
-  const lines = csv.trim().split(/\r?\n/).filter((l) => l.length > 0);
+  const lines = csv.trim().replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.length > 0);
   if (lines.length < 2) return [];
   const rawHeaders = parseCSVLine(lines[0]);
-  const headers = rawHeaders.map((h) => normalizeHeader(h) || h);
+  const headers = rawHeaders.map((h) => normalizeHeader(h.replace(/^\uFEFF/, '')) || h);
   const rows: Record<string, string>[] = [];
   for (let i = 1; i < lines.length; i++) {
     const values = parseCSVLine(lines[i]);
@@ -103,6 +103,21 @@ function bool(v: string): boolean {
 function cell(row: Record<string, string>, key: string): string {
   const normalized = normalizeHeader(key);
   return row[normalized] ?? row[key] ?? '';
+}
+
+/** Read deal_owner from a row; CSV headers can be "deal owner", "deal_owner", or have BOM. */
+function cellDealOwner(row: Record<string, string>): string {
+  const v =
+    cell(row, 'deal_owner') ||
+    cell(row, 'deal owner') ||
+    (row as Record<string, string>)['dealowner'] ||
+    (row as Record<string, string>)['deal_owner'] ||
+    '';
+  if (v) return String(v).trim();
+  for (const k of Object.keys(row)) {
+    if (/dealowner|deal_owner|deal\s*owner/.test(k.replace(/\s/g, '').toLowerCase())) return String(row[k] ?? '').trim();
+  }
+  return '';
 }
 
 function buildDetailsByMonth(
@@ -200,6 +215,12 @@ export interface LoadedSalesData {
   cumulativeChartData?: LoadedCumulativeChartData;
   /** From optional QuarterMetricInput sheet (quarter, metric, status, month1–3, total_projected, quarter_target). API may omit. */
   quarterMetricInput?: LoadedQuarterMetricInput;
+  /** Per-segment quarter targets from QuarterMetricInput Target rows (quarter -> metric -> segment -> target). Used when segment filter is active. */
+  quarterTargetBySegment?: Record<string, Record<string, Record<string, number>>>;
+  /** Unique deal_owner values per quarter from QuarterMetricInput sheet (for Quarter tab filter). */
+  quarterDealOwners?: Record<string, string[]>;
+  /** Per–deal-owner quarter targets from QuarterMetricInput Target rows (quarter -> metric -> dealOwner -> target). */
+  quarterTargetByDealOwner?: Record<string, Record<string, Record<string, number>>>;
 }
 
 export async function loadGoogleSheetsData(): Promise<LoadedSalesData> {
@@ -385,6 +406,7 @@ export async function loadGoogleSheetsData(): Promise<LoadedSalesData> {
         'clientwins': 'clientWins',
         'client wins': 'clientWins',
         acv: 'acv',
+        'acv signed': 'acv',
         'inyearrevenue': 'inYearRevenue',
         'in-year revenue': 'inYearRevenue',
         'in year revenue': 'inYearRevenue',
@@ -404,7 +426,13 @@ export async function loadGoogleSheetsData(): Promise<LoadedSalesData> {
         const m1 = num(cell(r, 'month1') || r.month1);
         const m2 = num(cell(r, 'month2') || r.month2);
         const m3 = num(cell(r, 'month3') || r.month3);
-        const qt = num(cell(r, 'quarter_target') || r.quarter_target);
+        const qt = num(
+          cell(r, 'quarter_target') ||
+            (r as Record<string, string>)['quartertarget'] ||
+            (r as Record<string, string>)['quartertar'] ||
+            (r as Record<string, string>)['quarter_target'] ||
+            ''
+        );
         const co = num(cell(r, 'carry_over') || r.carry_over);
         if (status === 'signed') {
           out[qRaw][metricKey]!.monthSigned[0] += m1;
@@ -414,11 +442,98 @@ export async function loadGoogleSheetsData(): Promise<LoadedSalesData> {
           out[qRaw][metricKey]!.monthForecasted[0] += m1;
           out[qRaw][metricKey]!.monthForecasted[1] += m2;
           out[qRaw][metricKey]!.monthForecasted[2] += m3;
+        } else if (status === 'target' && qt > 0) {
+          out[qRaw][metricKey]!.quarterTarget += qt;
         }
-        if (qt > 0) out[qRaw][metricKey]!.quarterTarget = qt;
         if (co > 0) out[qRaw][metricKey]!.carryOver = co;
       }
       return Object.keys(out).length > 0 ? out : undefined;
+    })(),
+    quarterTargetBySegment: (() => {
+      const bySegment: Record<string, Record<string, Record<string, number>>> = {};
+      for (const r of quarterMetricInputRows) {
+        const status = String((cell(r, 'status') || r.status) ?? '').trim().toLowerCase();
+        if (status !== 'target') continue;
+        const qRaw = String(((cell(r, 'quarter') || r.quarter) ?? '').trim()).toUpperCase();
+        if (!qRaw || !/^20\d{2}Q[1-4]$/.test(qRaw)) continue;
+        const metricRaw = String(((cell(r, 'metric') || r.metric) ?? '').trim()).toLowerCase();
+        const metricNorm: Record<string, QuarterProjectionMetricKey> = {
+          'clientwins': 'clientWins',
+          'client wins': 'clientWins',
+          acv: 'acv',
+          'acv signed': 'acv',
+          'inyearrevenue': 'inYearRevenue',
+          'in-year revenue': 'inYearRevenue',
+          'in year revenue': 'inYearRevenue',
+        };
+        const metricKey = metricNorm[metricRaw] ?? metricNorm[metricRaw.replace(/-/g, ' ')];
+        if (!metricKey) continue;
+        const segmentRaw = String((cell(r, 'segment') || r.segment) ?? '').trim();
+        if (!segmentRaw) continue;
+        const qt = num(
+          cell(r, 'quarter_target') ||
+            (r as Record<string, string>)['quartertarget'] ||
+            (r as Record<string, string>)['quartertar'] ||
+            (r as Record<string, string>)['quarter_target'] ||
+            ''
+        );
+        if (qt <= 0) continue;
+        if (!bySegment[qRaw]) bySegment[qRaw] = {};
+        if (!bySegment[qRaw][metricKey]) bySegment[qRaw][metricKey] = {};
+        bySegment[qRaw][metricKey][segmentRaw] = (bySegment[qRaw][metricKey][segmentRaw] ?? 0) + qt;
+      }
+      return Object.keys(bySegment).length > 0 ? bySegment : undefined;
+    })(),
+    quarterDealOwners: (() => {
+      const byQuarter: Record<string, Set<string>> = {};
+      for (const r of quarterMetricInputRows) {
+        const qRaw = String(((cell(r, 'quarter') || r.quarter) ?? '').trim()).toUpperCase();
+        if (!qRaw || !/^20\d{2}Q[1-4]$/.test(qRaw)) continue;
+        const ownerRaw = cellDealOwner(r);
+        if (!ownerRaw) continue;
+        if (!byQuarter[qRaw]) byQuarter[qRaw] = new Set();
+        byQuarter[qRaw].add(ownerRaw);
+      }
+      const out: Record<string, string[]> = {};
+      for (const [q, set] of Object.entries(byQuarter)) {
+        out[q] = Array.from(set).sort();
+      }
+      return Object.keys(out).length > 0 ? out : undefined;
+    })(),
+    quarterTargetByDealOwner: (() => {
+      const byOwner: Record<string, Record<string, Record<string, number>>> = {};
+      for (const r of quarterMetricInputRows) {
+        const status = String((cell(r, 'status') || r.status) ?? '').trim().toLowerCase();
+        if (status !== 'target') continue;
+        const qRaw = String(((cell(r, 'quarter') || r.quarter) ?? '').trim()).toUpperCase();
+        if (!qRaw || !/^20\d{2}Q[1-4]$/.test(qRaw)) continue;
+        const metricRaw = String(((cell(r, 'metric') || r.metric) ?? '').trim()).toLowerCase();
+        const metricNorm: Record<string, QuarterProjectionMetricKey> = {
+          'clientwins': 'clientWins',
+          'client wins': 'clientWins',
+          acv: 'acv',
+          'acv signed': 'acv',
+          'inyearrevenue': 'inYearRevenue',
+          'in-year revenue': 'inYearRevenue',
+          'in year revenue': 'inYearRevenue',
+        };
+        const metricKey = metricNorm[metricRaw] ?? metricNorm[metricRaw.replace(/-/g, ' ')];
+        if (!metricKey) continue;
+        const ownerRaw = cellDealOwner(r);
+        if (!ownerRaw) continue;
+        const qt = num(
+          cell(r, 'quarter_target') ||
+            (r as Record<string, string>)['quartertarget'] ||
+            (r as Record<string, string>)['quartertar'] ||
+            (r as Record<string, string>)['quarter_target'] ||
+            ''
+        );
+        if (qt <= 0) continue;
+        if (!byOwner[qRaw]) byOwner[qRaw] = {};
+        if (!byOwner[qRaw][metricKey]) byOwner[qRaw][metricKey] = {};
+        byOwner[qRaw][metricKey][ownerRaw] = (byOwner[qRaw][metricKey][ownerRaw] ?? 0) + qt;
+      }
+      return Object.keys(byOwner).length > 0 ? byOwner : undefined;
     })(),
   };
 }

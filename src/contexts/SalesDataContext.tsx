@@ -73,6 +73,14 @@ type SalesDataContextValue = {
   getAnnualTargets: () => AnnualTargets;
   /** Quarter targets for quarter tab waterfall (from QuarterTargets sheet or defaults) */
   getQuarterTargets: (quarter: QuarterId) => { clientWins: number; acv: number; inYearRevenue: number };
+  /** Quarter target for selected segments only (from QuarterMetricInput Target rows). Use when segment filter is active. */
+  getQuarterTargetForSegments: (quarter: QuarterId, metric: QuarterProjectionMetricKey, segments: string[]) => number;
+  /** Quarter target for selected deal owners only (from QuarterMetricInput Target rows). Use when deal owner filter is active. */
+  getQuarterTargetForDealOwners: (quarter: QuarterId, metric: QuarterProjectionMetricKey, owners: string[]) => number;
+  /** Segment names that have a quarter target in QuarterMetricInput (so filter dropdown can show all 5 segments). */
+  getQuarterTargetSegmentNames: (quarter: QuarterId) => string[];
+  /** Deal owner names from QuarterMetricInput sheet for the Quarter tab filter (not from deals). */
+  getQuarterDealOwnersFromSheet: (quarter: QuarterId) => string[];
   /** Cumulative chart: Actual/Forecast/Target per month from CumulativeChartData sheet, or null to use computed + linear target */
   getCumulativeChartData: (metric: CumulativeChartMetricKey) => { actual: number[]; forecast: number[]; target: number[] } | null;
   /** Quarter waterfall: Signed/Forecasted per month from QuarterMetricInput sheet, or null to use deal-based logic */
@@ -245,6 +253,72 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
     [googleData]
   );
 
+  const getQuarterTargetForSegments = useCallback(
+    (quarter: QuarterId, metric: QuarterProjectionMetricKey, segments: string[]): number => {
+      if (segments.length === 0) {
+        const t = getQuarterTargets(quarter);
+        return metric === 'clientWins' ? t.clientWins : metric === 'acv' ? t.acv : t.inYearRevenue;
+      }
+      const bySegment = googleData?.quarterTargetBySegment?.[quarter]?.[metric];
+      if (!bySegment) {
+        const t = getQuarterTargets(quarter);
+        return metric === 'clientWins' ? t.clientWins : metric === 'acv' ? t.acv : t.inYearRevenue;
+      }
+      let sum = 0;
+      for (const seg of segments) {
+        const trimmed = seg.trim();
+        if (bySegment[trimmed] != null) sum += bySegment[trimmed];
+        else if (bySegment[seg] != null) sum += bySegment[seg];
+      }
+      return sum;
+    },
+    [googleData, getQuarterTargets]
+  );
+
+  const getQuarterTargetForDealOwners = useCallback(
+    (quarter: QuarterId, metric: QuarterProjectionMetricKey, owners: string[]): number => {
+      if (owners.length === 0) {
+        const t = getQuarterTargets(quarter);
+        return metric === 'clientWins' ? t.clientWins : metric === 'acv' ? t.acv : t.inYearRevenue;
+      }
+      const byOwner = googleData?.quarterTargetByDealOwner?.[quarter]?.[metric];
+      if (!byOwner) {
+        const t = getQuarterTargets(quarter);
+        return metric === 'clientWins' ? t.clientWins : metric === 'acv' ? t.acv : t.inYearRevenue;
+      }
+      let sum = 0;
+      for (const owner of owners) {
+        const trimmed = owner.trim();
+        if (byOwner[trimmed] != null) sum += byOwner[trimmed];
+        else if (byOwner[owner] != null) sum += byOwner[owner];
+      }
+      return sum;
+    },
+    [googleData, getQuarterTargets]
+  );
+
+  const getQuarterTargetSegmentNames = useCallback(
+    (quarter: QuarterId): string[] => {
+      const byQuarter = googleData?.quarterTargetBySegment?.[quarter];
+      if (!byQuarter) return [];
+      const set = new Set<string>();
+      for (const bySegment of Object.values(byQuarter)) {
+        for (const seg of Object.keys(bySegment)) {
+          if (seg) set.add(seg);
+        }
+      }
+      return Array.from(set).sort();
+    },
+    [googleData]
+  );
+
+  const getQuarterDealOwnersFromSheet = useCallback(
+    (quarter: QuarterId): string[] => {
+      return googleData?.quarterDealOwners?.[quarter] ?? [];
+    },
+    [googleData]
+  );
+
   const getCumulativeChartData = useCallback(
     (metric: CumulativeChartMetricKey): { actual: number[]; forecast: number[]; target: number[] } | null => {
       const data = googleData?.cumulativeChartData?.[metric];
@@ -293,6 +367,10 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
     getQuarterDeals,
     getAnnualTargets,
     getQuarterTargets,
+    getQuarterTargetForSegments,
+    getQuarterTargetForDealOwners,
+    getQuarterTargetSegmentNames,
+    getQuarterDealOwnersFromSheet,
     getCumulativeChartData,
     getQuarterMetricInput,
   };

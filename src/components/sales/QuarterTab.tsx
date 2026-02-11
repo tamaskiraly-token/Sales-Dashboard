@@ -109,7 +109,7 @@ type WaterfallRow = {
 };
 
 export function QuarterTab({ tabId }: QuarterTabProps) {
-  const { getQuarterDeals, getQuarterTargets, getQuarterMetricInput } = useSalesData();
+  const { getQuarterDeals, getQuarterTargets, getQuarterTargetForSegments, getQuarterTargetForDealOwners, getQuarterTargetSegmentNames, getQuarterDealOwnersFromSheet, getQuarterMetricInput } = useSalesData();
   const quarter = tabIdToQuarter(tabId);
   const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
   const [selectedOwners, setSelectedOwners] = useState<string[]>([]);
@@ -118,9 +118,17 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
 
   const allDeals = useMemo(() => getQuarterDeals(quarter), [quarter, getQuarterDeals]);
   const dealOwners = useMemo(() => {
-    const set = new Set(allDeals.map((d) => d.dealOwner));
-    return Array.from(set).sort();
-  }, [allDeals]);
+    const fromSheet = getQuarterDealOwnersFromSheet(quarter);
+    if (fromSheet.length > 0) return fromSheet;
+    const fromDeals = Array.from(new Set(allDeals.map((d) => d.dealOwner))).sort();
+    return fromDeals;
+  }, [quarter, getQuarterDealOwnersFromSheet, allDeals]);
+  const segmentOptions = useMemo(() => {
+    const fromDeals = Array.from(new Set(allDeals.map((d) => d.segment).filter(Boolean)));
+    const fromTargets = getQuarterTargetSegmentNames(quarter);
+    const combined = Array.from(new Set([...fromDeals, ...fromTargets])).sort();
+    return combined.length > 0 ? combined : ['Bank & Bank Tech', 'Fintechs', 'Gateways', 'Large Merchants', 'HVHM'];
+  }, [allDeals, quarter, getQuarterTargetSegmentNames]);
 
   const deals = useMemo(() => {
     let list = allDeals;
@@ -155,7 +163,8 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
 
   const waterfallData = useMemo((): WaterfallRow[] => {
     const labels = QUARTER_MONTH_LABELS[quarter];
-    const quarterMetricInput = getQuarterMetricInput(quarter, projectionMetric);
+    const filtersActive = selectedSegments.length > 0 || selectedOwners.length > 0;
+    const quarterMetricInput = !filtersActive ? getQuarterMetricInput(quarter, projectionMetric) : null;
 
     let monthSigned: number[];
     let monthForecasted: number[];
@@ -207,17 +216,20 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
         (s, d) => s + getMetricFromDeal(d, projectionMetric),
         0
       );
-      const targets = getQuarterTargets(quarter);
-      const fullTarget =
-        projectionMetric === 'clientWins'
-          ? targets.clientWins
-          : projectionMetric === 'acv'
-            ? targets.acv
-            : targets.inYearRevenue;
-      targetValue =
-        allDealsQuarterTotal > 0 && (selectedSegments.length > 0 || selectedOwners.length > 0)
-          ? fullTarget * (quarterTotalProjected / allDealsQuarterTotal)
-          : fullTarget;
+      if (selectedOwners.length > 0) {
+        targetValue = getQuarterTargetForDealOwners(quarter, projectionMetric, selectedOwners);
+      } else if (selectedSegments.length > 0) {
+        targetValue = getQuarterTargetForSegments(quarter, projectionMetric, selectedSegments);
+      } else {
+        const targets = getQuarterTargets(quarter);
+        const fullTarget =
+          projectionMetric === 'clientWins'
+            ? targets.clientWins
+            : projectionMetric === 'acv'
+              ? targets.acv
+              : targets.inYearRevenue;
+        targetValue = fullTarget;
+      }
       if (projectionMetric === 'clientWins') {
         targetValue = Math.round(targetValue);
       } else {
@@ -273,6 +285,8 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
     carryOver,
     getQuarterMetricInput,
     getQuarterTargets,
+    getQuarterTargetForSegments,
+    getQuarterTargetForDealOwners,
   ]);
 
   const chartData = useMemo(() => {
@@ -327,7 +341,66 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
     return max > 0 ? max : 1;
   }, [waterfallData]);
 
-  /** Show label on Forecasted bar – only when forecasted > 0 so label sits on top of stack; when forecasted is 0 the label is shown on the Signed bar instead. */
+  /** Show total (signed + forecasted) for each month column. Use on Forecasted bar when forecasted > 0. */
+  const renderMonthTotalLabelOnForecasted = (props: {
+    x?: number;
+    y?: number;
+    width?: number;
+    index?: number;
+    payload?: WaterfallRow;
+  }) => {
+    const { x = 0, y = 0, width = 0, index = 0, payload } = props;
+    const row = payload ?? waterfallData[index];
+    if (!row || row.isTarget || row.isTotal || row.forecasted === 0) return null;
+    const labels = QUARTER_MONTH_LABELS[quarter];
+    if (!labels.includes(row.name)) return null;
+    const total = getWaterfallRowValue(row);
+    const displayValue = formatProjectionValue(total);
+    return (
+      <text
+        x={(x ?? 0) + (width ?? 0) / 2}
+        y={(y ?? 0) - 6}
+        textAnchor="middle"
+        fill="var(--sales-text)"
+        fontSize={12}
+        fontWeight={700}
+      >
+        {displayValue}
+      </text>
+    );
+  };
+
+  /** Show total for month column when only Signed (no forecasted) – on Signed bar so label is at top. */
+  const renderMonthTotalLabelOnSigned = (props: {
+    x?: number;
+    y?: number;
+    width?: number;
+    index?: number;
+    payload?: WaterfallRow;
+  }) => {
+    const { x = 0, y = 0, width = 0, index = 0, payload } = props;
+    const row = payload ?? waterfallData[index];
+    if (!row || row.isTarget || row.isTotal || row.forecasted !== 0) return null;
+    const labels = QUARTER_MONTH_LABELS[quarter];
+    if (!labels.includes(row.name)) return null;
+    const total = getWaterfallRowValue(row);
+    if (total === 0) return null;
+    const displayValue = formatProjectionValue(total);
+    return (
+      <text
+        x={(x ?? 0) + (width ?? 0) / 2}
+        y={(y ?? 0) - 6}
+        textAnchor="middle"
+        fill="var(--sales-text)"
+        fontSize={12}
+        fontWeight={700}
+      >
+        {displayValue}
+      </text>
+    );
+  };
+
+  /** Show label on Forecasted bar for non-month rows; month row totals are shown by renderMonthTotalLabel. */
   const renderWaterfallLabel = (props: {
     x?: number;
     y?: number;
@@ -336,13 +409,16 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
     index?: number;
     payload?: WaterfallRow;
   }) => {
-    const { x = 0, y = 0, width = 0, index = 0, payload } = props;
+    const { index = 0, payload } = props;
     const row = payload ?? waterfallData[index];
     if (row?.isTarget) return null;
+    const labels = QUARTER_MONTH_LABELS[quarter];
+    if (row && labels.includes(row.name)) return null; // month total shown by renderMonthTotalLabel
     if (row && row.forecasted === 0) return null;
     const total = row ? getWaterfallRowValue(row) : 0;
     const displayValue = row ? formatProjectionValue(total) : '';
     if (!row || total === 0) return null;
+    const { x = 0, y = 0, width = 0 } = props;
     return (
       <text
         x={(x ?? 0) + (width ?? 0) / 2}
@@ -411,7 +487,11 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
 
       <div className="sales-accounts-filters sales-chart-card">
         <div className="sales-accounts-filters-row">
-          <SegmentMultiselect selectedSegments={selectedSegments} onChange={setSelectedSegments} />
+          <SegmentMultiselect
+            selectedSegments={selectedSegments}
+            onChange={setSelectedSegments}
+            segmentOptions={segmentOptions}
+          />
           <DealOwnerMultiselect
             owners={dealOwners}
             selectedOwners={selectedOwners}
@@ -505,9 +585,11 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
               <Bar dataKey="baseline" name="baseline" stackId="wf" fill="transparent" radius={[0, 0, 0, 0]} legendType="none" />
               <Bar dataKey="signed" name="Signed" stackId="wf" fill="var(--sales-chart-1)" radius={[0, 0, 0, 0]}>
                 <LabelList content={renderWaterfallLabelSignedOnly as any} position="top" />
+                <LabelList content={renderMonthTotalLabelOnSigned as any} position="top" />
               </Bar>
               <Bar dataKey="forecasted" name="Forecasted" stackId="wf" fill="var(--sales-chart-3)" radius={[4, 4, 0, 0]}>
                 <LabelList content={renderWaterfallLabel as any} position="top" />
+                <LabelList content={renderMonthTotalLabelOnForecasted as any} position="top" />
               </Bar>
               <Bar
                 dataKey="target"

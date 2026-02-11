@@ -4,6 +4,8 @@ import { SEGMENT_OPTIONS } from '../../data/salesMockData';
 interface SegmentMultiselectProps {
   selectedSegments: string[];
   onChange: (selected: string[]) => void;
+  /** If provided, use these options instead of SEGMENT_OPTIONS (e.g. segments from current data). */
+  segmentOptions?: string[];
   label?: string;
   className?: string;
 }
@@ -11,11 +13,13 @@ interface SegmentMultiselectProps {
 export function SegmentMultiselect({
   selectedSegments,
   onChange,
+  segmentOptions,
   label = 'Segment',
   className = '',
 }: SegmentMultiselectProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const options = segmentOptions ?? [...SEGMENT_OPTIONS];
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -42,13 +46,13 @@ export function SegmentMultiselect({
     }
   };
 
-  const selectAll = () => onChange([...SEGMENT_OPTIONS]);
+  const selectAll = () => onChange([...options]);
   const clearAll = () => onChange([]);
 
   const summary =
     selectedSegments.length === 0
       ? 'All'
-      : selectedSegments.length === SEGMENT_OPTIONS.length
+      : selectedSegments.length === options.length
         ? 'All'
         : `${selectedSegments.length} selected`;
 
@@ -75,7 +79,7 @@ export function SegmentMultiselect({
             </button>
           </div>
           <div className="sales-segment-dropdown-list">
-            {SEGMENT_OPTIONS.map((seg) => (
+            {options.map((seg) => (
               <label key={seg} className="sales-segment-option">
                 <input
                   type="checkbox"
