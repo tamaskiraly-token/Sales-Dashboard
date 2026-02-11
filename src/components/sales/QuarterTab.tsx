@@ -210,12 +210,6 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
         monthForecasted.push(forecasted);
       }
 
-      const quarterTotalProjected =
-        monthSigned[0] + monthSigned[1] + monthSigned[2] + monthForecasted[0] + monthForecasted[1] + monthForecasted[2];
-      const allDealsQuarterTotal = allDeals.reduce(
-        (s, d) => s + getMetricFromDeal(d, projectionMetric),
-        0
-      );
       if (selectedOwners.length > 0) {
         targetValue = getQuarterTargetForDealOwners(quarter, projectionMetric, selectedOwners);
       } else if (selectedSegments.length > 0) {
