@@ -648,7 +648,7 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
           'header', 'sub-header', 'subheader'
         ];
         
-        const filteredRows = q1DetailsTable.filter((row, index) => {
+        const filteredRows = q1DetailsTable.filter((row) => {
           // Skip if it's likely a header row (values match column names)
           const matchingColumns = columns.filter(col => {
             const rowValue = (row[col] ?? '').toLowerCase().trim();
