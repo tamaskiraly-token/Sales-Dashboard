@@ -85,6 +85,14 @@ type SalesDataContextValue = {
   getCumulativeChartData: (metric: CumulativeChartMetricKey) => { actual: number[]; forecast: number[]; target: number[] } | null;
   /** Quarter waterfall: Signed/Forecasted per month from QuarterMetricInput sheet, or null to use deal-based logic */
   getQuarterMetricInput: (quarter: QuarterId, metric: QuarterProjectionMetricKey) => { monthSigned: number[]; monthForecasted: number[]; quarterTarget: number; carryOver: number } | null;
+  /** Q1 details table from Q1details sheet (for Q1 tab below waterfall). */
+  getQ1DetailsTable: () => Record<string, string>[];
+  /** January details table from JanuaryDetails sheet (for pop-up when clicking January bars). */
+  getJanuaryDetailsTable: () => Record<string, string>[];
+  /** February details table from Febdetails sheet (for pop-up when clicking February bars). */
+  getFebruaryDetailsTable: () => Record<string, string>[];
+  /** March details table from Mardetails sheet (for pop-up when clicking March bars). */
+  getMarchDetailsTable: () => Record<string, string>[];
 };
 
 const SalesDataContext = createContext<SalesDataContextValue | null>(null);
@@ -347,6 +355,22 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
     [googleData]
   );
 
+  const getQ1DetailsTable = useCallback((): Record<string, string>[] => {
+    return googleData?.q1DetailsTable ?? [];
+  }, [googleData]);
+
+  const getJanuaryDetailsTable = useCallback((): Record<string, string>[] => {
+    return googleData?.januaryDetailsTable ?? [];
+  }, [googleData]);
+
+  const getFebruaryDetailsTable = useCallback((): Record<string, string>[] => {
+    return googleData?.februaryDetailsTable ?? [];
+  }, [googleData]);
+
+  const getMarchDetailsTable = useCallback((): Record<string, string>[] => {
+    return googleData?.marchDetailsTable ?? [];
+  }, [googleData]);
+
   const value: SalesDataContextValue = {
     useApi,
     useGoogleSheets,
@@ -373,6 +397,10 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
     getQuarterDealOwnersFromSheet,
     getCumulativeChartData,
     getQuarterMetricInput,
+    getQ1DetailsTable,
+    getJanuaryDetailsTable,
+    getFebruaryDetailsTable,
+    getMarchDetailsTable,
   };
 
   return (

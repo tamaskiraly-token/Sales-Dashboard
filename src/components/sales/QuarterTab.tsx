@@ -16,6 +16,7 @@ import { useSalesData } from '../../contexts/SalesDataContext';
 import type { QuarterId, QuarterDeal } from '../../data/salesMockData';
 import { SegmentMultiselect } from './SegmentMultiselect';
 import { DealOwnerMultiselect } from './DealOwnerMultiselect';
+import { MonthDetailsModal } from './JanuaryDetailsModal';
 
 const QUARTER_MONTH_LABELS: Record<QuarterId, [string, string, string]> = {
   '2026Q1': ['Jan', 'Feb', 'Mar'],
@@ -31,10 +32,8 @@ const QUARTER_MONTH_NUMS: Record<QuarterId, number[]> = {
   '2026Q4': [10, 11, 12],
 };
 
-type BarMetric = 'acv' | 'arrForecast' | 'annualizedTransactionForecast';
-
 /** Metric for the quarterly projection waterfall: client wins (count), ACV signed, or in-year revenue */
-type QuarterProjectionMetric = 'clientWins' | 'acv' | 'inYearRevenue';
+export type QuarterProjectionMetric = 'clientWins' | 'acv' | 'inYearRevenue';
 
 const QUARTER_LABEL: Record<string, string> = {
   '2026Q1': '2026 Q1 (Jan–Mar)',
@@ -75,22 +74,10 @@ function getMetricFromDeal(d: QuarterDeal, metric: QuarterProjectionMetric): num
   return d.arrForecast; // inYearRevenue
 }
 
-function formatDate(iso: string): string {
-  const [y, m, d] = iso.split('-');
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${d}/${months[parseInt(m!, 10) - 1]}/${y}`;
-}
-
 function formatCurrency(value: number): string {
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `$${(value / 1_000).toFixed(0)}K`;
   return `$${value}`;
-}
-
-function formatNumber(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(0)}K`;
-  return value.toLocaleString();
 }
 
 interface QuarterTabProps {
@@ -109,12 +96,14 @@ type WaterfallRow = {
 };
 
 export function QuarterTab({ tabId }: QuarterTabProps) {
-  const { getQuarterDeals, getQuarterTargets, getQuarterTargetForSegments, getQuarterTargetForDealOwners, getQuarterTargetSegmentNames, getQuarterDealOwnersFromSheet, getQuarterMetricInput } = useSalesData();
+  const { getQuarterDeals, getQuarterTargets, getQuarterTargetForSegments, getQuarterTargetForDealOwners, getQuarterTargetSegmentNames, getQuarterDealOwnersFromSheet, getQuarterMetricInput, getQ1DetailsTable, getJanuaryDetailsTable, getFebruaryDetailsTable, getMarchDetailsTable } = useSalesData();
   const quarter = tabIdToQuarter(tabId);
   const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
   const [selectedOwners, setSelectedOwners] = useState<string[]>([]);
   const [projectionMetric, setProjectionMetric] = useState<QuarterProjectionMetric>('acv');
-  const [barMetric, setBarMetric] = useState<BarMetric>('acv');
+  const [isJanuaryModalOpen, setIsJanuaryModalOpen] = useState(false);
+  const [isFebruaryModalOpen, setIsFebruaryModalOpen] = useState(false);
+  const [isMarchModalOpen, setIsMarchModalOpen] = useState(false);
 
   const allDeals = useMemo(() => getQuarterDeals(quarter), [quarter, getQuarterDeals]);
   const dealOwners = useMemo(() => {
@@ -123,6 +112,11 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
     const fromDeals = Array.from(new Set(allDeals.map((d) => d.dealOwner))).sort();
     return fromDeals;
   }, [quarter, getQuarterDealOwnersFromSheet, allDeals]);
+  const q1DetailsTable = useMemo(() => getQ1DetailsTable(), [getQ1DetailsTable]);
+  const januaryDetailsTable = useMemo(() => getJanuaryDetailsTable(), [getJanuaryDetailsTable]);
+  const februaryDetailsTable = useMemo(() => getFebruaryDetailsTable(), [getFebruaryDetailsTable]);
+  const marchDetailsTable = useMemo(() => getMarchDetailsTable(), [getMarchDetailsTable]);
+
   const segmentOptions = useMemo(() => {
     const fromDeals = Array.from(new Set(allDeals.map((d) => d.segment).filter(Boolean)));
     const fromTargets = getQuarterTargetSegmentNames(quarter);
@@ -283,40 +277,6 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
     getQuarterTargetForDealOwners,
   ]);
 
-  const chartData = useMemo(() => {
-    const byClient = new Map<string, { acv: number; arrForecast: number; annualizedTransactionForecast: number }>();
-    for (const d of deals) {
-      const cur = byClient.get(d.clientName) ?? { acv: 0, arrForecast: 0, annualizedTransactionForecast: 0 };
-      cur.acv += d.acv;
-      cur.arrForecast += d.arrForecast;
-      cur.annualizedTransactionForecast += d.annualizedTransactionForecast;
-      byClient.set(d.clientName, cur);
-    }
-    return Array.from(byClient.entries())
-      .map(([clientName, vals]) => ({ clientName, ...vals }))
-      .sort((a, b) => (b[barMetric] as number) - (a[barMetric] as number));
-  }, [deals, barMetric]);
-
-  const dataKey = barMetric;
-  const formatTooltip = (value: number) =>
-    barMetric === 'annualizedTransactionForecast' ? formatNumber(value) : formatCurrency(value);
-  const formatAxis = (value: number) =>
-    barMetric === 'annualizedTransactionForecast' ? formatNumber(value) : formatCurrency(value);
-
-  const metricLabel =
-    barMetric === 'acv'
-      ? 'ACV'
-      : barMetric === 'arrForecast'
-        ? 'ARR forecast'
-        : 'Annualized transaction forecast';
-
-  const totalSum = useMemo(
-    () => chartData.reduce((s, row) => s + (row[barMetric] as number), 0),
-    [chartData, barMetric]
-  );
-  const totalSumFormatted =
-    barMetric === 'annualizedTransactionForecast' ? formatNumber(totalSum) : formatCurrency(totalSum);
-
   const formatProjectionValue = (value: number) =>
     projectionMetric === 'clientWins' ? String(Math.round(value)) : formatCurrency(value);
   const formatProjectionAxis = (value: number) =>
@@ -475,7 +435,7 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
       <header className="sales-page-header">
         <h1 className="sales-page-title">{QUARTER_LABEL[quarter]}</h1>
         <p className="sales-page-subtitle">
-          Deals anticipated to close in this quarter. Filter below, then quarterly waterfall, per-client bar chart and deal table.
+          Deals anticipated to close in this quarter. Filter below, then view the quarterly waterfall.
         </p>
       </header>
 
@@ -578,10 +538,46 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
               />
               <Bar dataKey="baseline" name="baseline" stackId="wf" fill="transparent" radius={[0, 0, 0, 0]} legendType="none" />
               <Bar dataKey="signed" name="Signed" stackId="wf" fill="var(--sales-chart-1)" radius={[0, 0, 0, 0]}>
+                {waterfallData.map((entry, index) => {
+                  const isClickable = quarter === '2026Q1' && (entry.name === 'Jan' || entry.name === 'Feb' || entry.name === 'Mar');
+                  return (
+                    <Cell
+                      key={`signed-${index}`}
+                      style={{
+                        cursor: isClickable ? 'pointer' : 'default',
+                      }}
+                      onClick={() => {
+                        if (quarter === '2026Q1') {
+                          if (entry.name === 'Jan') setIsJanuaryModalOpen(true);
+                          else if (entry.name === 'Feb') setIsFebruaryModalOpen(true);
+                          else if (entry.name === 'Mar') setIsMarchModalOpen(true);
+                        }
+                      }}
+                    />
+                  );
+                })}
                 <LabelList content={renderWaterfallLabelSignedOnly as any} position="top" />
                 <LabelList content={renderMonthTotalLabelOnSigned as any} position="top" />
               </Bar>
               <Bar dataKey="forecasted" name="Forecasted" stackId="wf" fill="var(--sales-chart-3)" radius={[4, 4, 0, 0]}>
+                {waterfallData.map((entry, index) => {
+                  const isClickable = quarter === '2026Q1' && (entry.name === 'Jan' || entry.name === 'Feb' || entry.name === 'Mar');
+                  return (
+                    <Cell
+                      key={`forecasted-${index}`}
+                      style={{
+                        cursor: isClickable ? 'pointer' : 'default',
+                      }}
+                      onClick={() => {
+                        if (quarter === '2026Q1') {
+                          if (entry.name === 'Jan') setIsJanuaryModalOpen(true);
+                          else if (entry.name === 'Feb') setIsFebruaryModalOpen(true);
+                          else if (entry.name === 'Mar') setIsMarchModalOpen(true);
+                        }
+                      }}
+                    />
+                  );
+                })}
                 <LabelList content={renderWaterfallLabel as any} position="top" />
                 <LabelList content={renderMonthTotalLabelOnForecasted as any} position="top" />
               </Bar>
@@ -609,108 +605,251 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
         </div>
       </div>
 
-      <div className="sales-chart-card sales-quarter-chart">
-        <div className="sales-chart-header sales-chart-header-with-switch">
-          <div>
-            <h3 className="sales-chart-title">Per client</h3>
-            <p className="sales-chart-sub">Horizontal bar chart: {metricLabel}</p>
-          </div>
-          <div className="sales-quarter-sum-kpi">
-            <span className="sales-quarter-sum-label">Total {metricLabel}</span>
-            <span className="sales-quarter-sum-value">{totalSumFormatted}</span>
-          </div>
-          <div className="sales-view-switch">
-            <span className="sales-view-switch-label">Show:</span>
-            <button
-              type="button"
-              className={`sales-view-switch-btn ${barMetric === 'acv' ? 'active' : ''}`}
-              onClick={() => setBarMetric('acv')}
-            >
-              ACV
-            </button>
-            <button
-              type="button"
-              className={`sales-view-switch-btn ${barMetric === 'arrForecast' ? 'active' : ''}`}
-              onClick={() => setBarMetric('arrForecast')}
-            >
-              ARR forecast
-            </button>
-            <button
-              type="button"
-              className={`sales-view-switch-btn ${barMetric === 'annualizedTransactionForecast' ? 'active' : ''}`}
-              onClick={() => setBarMetric('annualizedTransactionForecast')}
-            >
-              Ann. txn forecast
-            </button>
-          </div>
-        </div>
-        <div className="sales-chart-body">
-          <ResponsiveContainer width="100%" height={Math.max(240, chartData.length * 36)}>
-            <BarChart
-              layout="vertical"
-              data={chartData}
-              margin={{ top: 8, right: 24, left: 100, bottom: 8 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--sales-border)" horizontal={false} />
-              <XAxis type="number" tickFormatter={formatAxis} tick={{ fill: 'var(--sales-text-secondary)', fontSize: 11 }} />
-              <YAxis type="category" dataKey="clientName" width={96} tick={{ fill: 'var(--sales-text-secondary)', fontSize: 11 }} />
-              <Tooltip
-                formatter={(value: ValueType | undefined, name?: NameType) => {
-                  const n = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : 0;
-                  return [Number.isFinite(n) ? formatTooltip(n) : '—', String(name ?? metricLabel)];
-                }}
-                contentStyle={{
-                  background: 'var(--sales-surface)',
-                  border: '1px solid var(--sales-border)',
-                  borderRadius: 12,
-                }}
-                labelStyle={{ color: 'var(--sales-text)' }}
-              />
-              <Bar dataKey={dataKey} name={metricLabel} fill="var(--sales-primary)" radius={[0, 4, 4, 0]} barSize={24} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
+      {quarter === '2026Q1' && q1DetailsTable.length > 0 && (() => {
+        // Format header names with proper spacing and capitalization
+        const formatHeaderName = (key: string): string => {
+          return key
+            .replace(/_/g, ' ')
+            .replace(/([a-z])([A-Z])/g, '$1 $2') // Add space before capital letters
+            .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2') // Split consecutive capitals
+            .split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .join(' ');
+        };
 
-      <div className="sales-accounts-table-wrap sales-chart-card">
-        <div className="sales-accounts-table-meta">
-          {deals.length} deal{deals.length !== 1 ? 's' : ''} closing in this quarter
-        </div>
-        <div className="sales-accounts-table-scroll">
-          <table className="sales-accounts-table">
-            <thead>
-              <tr>
-                <th>Deal name</th>
-                <th>Confidence of quarter close</th>
-                <th>Close date</th>
-                <th>Segment</th>
-                <th>ACV</th>
-                <th>ARR forecast</th>
-                <th>Ann. txn forecast</th>
-                <th>Target account</th>
-                <th>Latest / Next steps</th>
-                <th>Deal owner</th>
-              </tr>
-            </thead>
-            <tbody>
-              {deals.map((d) => (
-                <tr key={d.id}>
-                  <td className="sales-accounts-cell-name">{d.dealName}</td>
-                  <td>{d.confidenceQuarterClose}%</td>
-                  <td>{formatDate(d.closeDate)}</td>
-                  <td>{d.segment}</td>
-                  <td className="sales-accounts-cell-acv">{formatCurrency(d.acv)}</td>
-                  <td>{formatCurrency(d.arrForecast)}</td>
-                  <td>{formatNumber(d.annualizedTransactionForecast)}</td>
-                  <td>{d.targetAccount ? 'Yes' : 'No'}</td>
-                  <td className="sales-accounts-cell-steps">{d.latestNextSteps}</td>
-                  <td>{d.dealOwner}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+        // Check if a value is numeric
+        const isNumeric = (value: string): boolean => {
+          if (!value || value.trim() === '') return false;
+          const cleaned = value.replace(/[,$%]/g, '').trim();
+          return !isNaN(Number(cleaned)) && cleaned !== '';
+        };
+
+        // Format number with thousands separator
+        const formatNumber = (value: string): string => {
+          if (!value || value.trim() === '') return '';
+          const num = parseFloat(value.replace(/[,$]/g, ''));
+          if (isNaN(num)) return value;
+          return num.toLocaleString('en-US');
+        };
+
+        const columns = Object.keys(q1DetailsTable[0]);
+        
+        // Find the FY26ARRFORECAST column index for validation
+        const arrForecastColIndex = columns.findIndex(col => 
+          col.toLowerCase().includes('fy26arrforecast') || 
+          col.toLowerCase().includes('arrforecast') ||
+          col.toLowerCase().includes('fy26arr')
+        );
+
+        // Filter out rows that look like headers or sub-headers
+        // Common sub-header patterns: "Y/N", "Latest / Next Steps", etc.
+        const subHeaderPatterns = [
+          'y/n', 'yes/no', 'latest', 'next steps', 'steps', 
+          'header', 'sub-header', 'subheader'
+        ];
+        
+        const filteredRows = q1DetailsTable.filter((row, index) => {
+          // Skip if it's likely a header row (values match column names)
+          const matchingColumns = columns.filter(col => {
+            const rowValue = (row[col] ?? '').toLowerCase().trim();
+            const colName = col.toLowerCase().trim();
+            return rowValue === colName || rowValue === formatHeaderName(col).toLowerCase().trim();
+          });
+          
+          // If more than 50% of values match column names, it's likely a header row
+          if (matchingColumns.length > columns.length * 0.5) {
+            return false;
+          }
+          
+          // Check if row contains common sub-header patterns
+          const rowValues = columns.map(col => (row[col] ?? '').toLowerCase().trim()).join(' ');
+          const hasSubHeaderPattern = subHeaderPatterns.some(pattern => 
+            rowValues.includes(pattern)
+          );
+          
+          // If row has sub-header patterns and few or no numeric values, skip it
+          if (hasSubHeaderPattern) {
+            const numericValues = columns.filter(col => {
+              const value = row[col] ?? '';
+              return isNumeric(value);
+            });
+            // If less than 20% of columns have numeric values, it's likely a sub-header
+            if (numericValues.length < columns.length * 0.2) {
+              return false;
+            }
+          }
+          
+          return true;
+        });
+
+        return (
+          <div className="sales-accounts-table-wrap sales-chart-card">
+            <div className="sales-accounts-table-meta">Q1 details</div>
+            <div className="sales-accounts-table-scroll">
+              <table className="sales-accounts-table" style={{ tableLayout: 'auto' }}>
+                <thead>
+                  <tr>
+                    {columns.map((key) => (
+                      <th 
+                        key={key}
+                        style={{
+                          whiteSpace: 'normal',
+                          wordWrap: 'break-word',
+                          maxWidth: '200px',
+                          minWidth: '100px',
+                          lineHeight: '1.4',
+                          verticalAlign: 'top',
+                        }}
+                      >
+                        {formatHeaderName(key)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRows.map((row, i) => {
+                    // Validate row has all expected columns
+                    const hasAllColumns = columns.every(col => col in row);
+                    if (!hasAllColumns) {
+                      console.warn(`[Q1DetailsTable] Row ${i} missing columns:`, 
+                        columns.filter(col => !(col in row))
+                      );
+                    }
+                    
+                    // Debug: Check FY26ARRFORECAST column alignment
+                    if (arrForecastColIndex >= 0 && i < 3) {
+                      const arrForecastKey = columns[arrForecastColIndex];
+                      const arrForecastValue = row[arrForecastKey];
+                      const nextColValue = columns[arrForecastColIndex + 1] ? row[columns[arrForecastColIndex + 1]] : null;
+                      if (arrForecastValue && !isNumeric(arrForecastValue) && nextColValue && isNumeric(nextColValue)) {
+                        console.warn(`[Q1DetailsTable] Row ${i}: Possible misalignment detected. FY26ARRFORECAST="${arrForecastValue}", Next column="${nextColValue}"`);
+                      }
+                    }
+                    
+                    return (
+                      <tr key={i}>
+                        {columns.map((key, colIndex) => {
+                          const value = (row[key] ?? '').toString().trim();
+                          const formattedValue = isNumeric(value) && !value.includes('%') 
+                            ? formatNumber(value) 
+                            : value;
+                          
+                          // Highlight potential misaligned ARR Forecast values
+                          const isArrForecastCol = colIndex === arrForecastColIndex;
+                          const mightBeMisaligned = isArrForecastCol && value && !isNumeric(value) && value.length > 0;
+                          
+                          return (
+                            <td 
+                              key={key}
+                              style={{
+                                whiteSpace: 'normal',
+                                wordWrap: 'break-word',
+                                maxWidth: '200px',
+                                verticalAlign: 'top',
+                                textAlign: isNumeric(value) && !value.includes('%') ? 'right' : 'left',
+                                backgroundColor: mightBeMisaligned ? 'rgba(255, 200, 0, 0.1)' : 'transparent',
+                              }}
+                              title={mightBeMisaligned ? 'This value might be misaligned' : undefined}
+                            >
+                              {formattedValue}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                  {(() => {
+                    // Calculate totals for numeric columns
+                    const numericColumns = columns.filter(key => {
+                      return filteredRows.some(row => {
+                        const value = (row[key] ?? '').toString().trim();
+                        return isNumeric(value) && !value.includes('%');
+                      });
+                    });
+
+                    if (numericColumns.length === 0) return null;
+
+                    return (
+                      <tr style={{ fontWeight: 700, backgroundColor: 'var(--sales-accent-soft)' }}>
+                        {columns.map((key, colIndex) => {
+                          const isNumericCol = numericColumns.includes(key);
+                          if (isNumericCol) {
+                            const total = filteredRows.reduce((sum, row) => {
+                              const val = (row[key] ?? '').toString().trim();
+                              if (isNumeric(val) && !val.includes('%')) {
+                                return sum + parseFloat(val.replace(/[,$]/g, ''));
+                              }
+                              return sum;
+                            }, 0);
+                            return (
+                              <td 
+                                key={key}
+                                style={{ 
+                                  fontWeight: 700,
+                                  textAlign: 'right',
+                                  whiteSpace: 'normal',
+                                  wordWrap: 'break-word',
+                                  maxWidth: '200px',
+                                  verticalAlign: 'top',
+                                }}
+                              >
+                                {formatNumber(total.toString())}
+                              </td>
+                            );
+                          }
+                          // For non-numeric columns, show "Total" in first column, empty for others
+                          const isFirstColumn = colIndex === 0;
+                          return (
+                            <td 
+                              key={key}
+                              style={{ 
+                                fontWeight: 700,
+                                textAlign: isFirstColumn ? 'right' : 'left',
+                                whiteSpace: 'normal',
+                                wordWrap: 'break-word',
+                                maxWidth: '200px',
+                                verticalAlign: 'top',
+                              }}
+                            >
+                              {isFirstColumn ? 'Total' : ''}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
+
+      {quarter === '2026Q1' && (
+        <>
+          <MonthDetailsModal
+            isOpen={isJanuaryModalOpen}
+            onClose={() => setIsJanuaryModalOpen(false)}
+            data={januaryDetailsTable}
+            selectedMetric={projectionMetric}
+            month="Jan"
+          />
+          <MonthDetailsModal
+            isOpen={isFebruaryModalOpen}
+            onClose={() => setIsFebruaryModalOpen(false)}
+            data={februaryDetailsTable}
+            selectedMetric={projectionMetric}
+            month="Feb"
+          />
+          <MonthDetailsModal
+            isOpen={isMarchModalOpen}
+            onClose={() => setIsMarchModalOpen(false)}
+            data={marchDetailsTable}
+            selectedMetric={projectionMetric}
+            month="Mar"
+          />
+        </>
+      )}
     </div>
   );
 }

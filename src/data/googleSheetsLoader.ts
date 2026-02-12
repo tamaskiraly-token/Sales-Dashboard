@@ -42,33 +42,56 @@ function normalizeHeader(h: string): string {
 function parseCSVLine(line: string): string[] {
   const out: string[] = [];
   let i = 0;
-  while (i < line.length) {
+  
+  while (i <= line.length) {
+    if (i >= line.length) {
+      // End of line - add empty field if we're at the end
+      if (out.length === 0 || line[line.length - 1] === ',') {
+        out.push('');
+      }
+      break;
+    }
+    
     if (line[i] === '"') {
+      // Quoted field
       let val = '';
       i += 1;
       while (i < line.length) {
         if (line[i] === '"') {
           i += 1;
-          if (line[i] === '"') {
+          if (i < line.length && line[i] === '"') {
+            // Escaped quote
             val += '"';
             i += 1;
-          } else break;
+          } else {
+            // End of quoted field
+            break;
+          }
         } else {
           val += line[i];
           i += 1;
         }
       }
       out.push(val.trim());
+      // Skip comma after quoted field
+      if (i < line.length && line[i] === ',') {
+        i += 1;
+      }
     } else {
+      // Unquoted field
       let val = '';
       while (i < line.length && line[i] !== ',') {
         val += line[i];
         i += 1;
       }
       out.push(val.trim().replace(/^"|"$/g, ''));
-      i += 1;
+      // Skip comma
+      if (i < line.length && line[i] === ',') {
+        i += 1;
+      }
     }
   }
+  
   return out;
 }
 
@@ -77,12 +100,22 @@ function parseCSV(csv: string): Record<string, string>[] {
   if (lines.length < 2) return [];
   const rawHeaders = parseCSVLine(lines[0]);
   const headers = rawHeaders.map((h) => normalizeHeader(h.replace(/^\uFEFF/, '')) || h);
+  const expectedColumnCount = headers.length;
   const rows: Record<string, string>[] = [];
+  
   for (let i = 1; i < lines.length; i++) {
     const values = parseCSVLine(lines[i]);
+    
+    // Pad or truncate values to match expected column count
+    // This ensures columns don't shift due to missing trailing commas or extra values
+    const normalizedValues: string[] = [];
+    for (let j = 0; j < expectedColumnCount; j++) {
+      normalizedValues[j] = (values[j] ?? '').trim().replace(/^"|"$/g, '');
+    }
+    
     const row: Record<string, string> = {};
     headers.forEach((h, j) => {
-      row[h] = (values[j] ?? '').trim().replace(/^"|"$/g, '');
+      row[h] = normalizedValues[j] ?? '';
     });
     rows.push(row);
   }
@@ -221,6 +254,14 @@ export interface LoadedSalesData {
   quarterDealOwners?: Record<string, string[]>;
   /** Per–deal-owner quarter targets from QuarterMetricInput Target rows (quarter -> metric -> dealOwner -> target). */
   quarterTargetByDealOwner?: Record<string, Record<string, Record<string, number>>>;
+  /** Table data from Q1details sheet (array of rows, keys = normalized column headers). Shown below waterfall on Q1 tab. */
+  q1DetailsTable?: Record<string, string>[];
+  /** Table data from JanuaryDetails sheet (array of rows, keys = normalized column headers). Used for pop-up when clicking January bars. */
+  januaryDetailsTable?: Record<string, string>[];
+  /** Table data from Febdetails sheet (array of rows, keys = normalized column headers). Used for pop-up when clicking February bars. */
+  februaryDetailsTable?: Record<string, string>[];
+  /** Table data from Mardetails sheet (array of rows, keys = normalized column headers). Used for pop-up when clicking March bars. */
+  marchDetailsTable?: Record<string, string>[];
 }
 
 export async function loadGoogleSheetsData(): Promise<LoadedSalesData> {
@@ -237,7 +278,7 @@ export async function loadGoogleSheetsData(): Promise<LoadedSalesData> {
     }
   };
 
-  const [salesKPIsRows, forecastPointRows, forecastBySegRows, pipelineStageRows, dealSegRows, arrByMonthRows, arrLicRows, arrMinRows, arrVolRows, pipelineDealRows, acvRows, clientWinsRows, clientDealRows, quarterDealRows, quarterTargetsRows, cumulativeChartRows, quarterMetricInputRows] = await Promise.all([
+  const [salesKPIsRows, forecastPointRows, forecastBySegRows, pipelineStageRows, dealSegRows, arrByMonthRows, arrLicRows, arrMinRows, arrVolRows, pipelineDealRows, acvRows, clientWinsRows, clientDealRows, quarterDealRows, quarterTargetsRows, cumulativeChartRows, quarterMetricInputRows, q1DetailsRows, januaryDetailsRows, februaryDetailsRows, marchDetailsRows] = await Promise.all([
     sheet('SalesKPIs'),
     sheet('ForecastPoint'),
     sheet('ForecastPointBySegment'),
@@ -260,6 +301,18 @@ export async function loadGoogleSheetsData(): Promise<LoadedSalesData> {
       : Promise.resolve([]),
     googleSheetsConfig.sheetGids['QuarterMetricInput']
       ? fetchSheetOptional('QuarterMetricInput')
+      : Promise.resolve([]),
+    googleSheetsConfig.sheetGids['Q1details']
+      ? fetchSheetOptional('Q1details')
+      : Promise.resolve([]),
+    googleSheetsConfig.sheetGids['JanuaryDetails']
+      ? fetchSheetOptional('JanuaryDetails')
+      : Promise.resolve([]),
+    googleSheetsConfig.sheetGids['Febdetails']
+      ? fetchSheetOptional('Febdetails')
+      : Promise.resolve([]),
+    googleSheetsConfig.sheetGids['Mardetails']
+      ? fetchSheetOptional('Mardetails')
       : Promise.resolve([]),
   ]);
 
@@ -535,6 +588,10 @@ export async function loadGoogleSheetsData(): Promise<LoadedSalesData> {
       }
       return Object.keys(byOwner).length > 0 ? byOwner : undefined;
     })(),
+    q1DetailsTable: (q1DetailsRows?.length ?? 0) > 0 ? q1DetailsRows : undefined,
+    januaryDetailsTable: (januaryDetailsRows?.length ?? 0) > 0 ? januaryDetailsRows : undefined,
+    februaryDetailsTable: (februaryDetailsRows?.length ?? 0) > 0 ? februaryDetailsRows : undefined,
+    marchDetailsTable: (marchDetailsRows?.length ?? 0) > 0 ? marchDetailsRows : undefined,
   };
 }
 
