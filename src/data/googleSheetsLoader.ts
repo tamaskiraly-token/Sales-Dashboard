@@ -254,6 +254,10 @@ export interface LoadedSalesData {
   quarterDealOwners?: Record<string, string[]>;
   /** Per–deal-owner quarter targets from QuarterMetricInput Target rows (quarter -> metric -> dealOwner -> target). */
   quarterTargetByDealOwner?: Record<string, Record<string, Record<string, number>>>;
+  /** Per-segment month Signed/Forecasted from QuarterMetricInput (for waterfall when segment filter active). */
+  quarterMetricInputBySegment?: Record<string, Record<string, Record<string, { monthSigned: number[]; monthForecasted: number[]; carryOver: number }>>>;
+  /** Per-deal-owner month Signed/Forecasted from QuarterMetricInput (for waterfall when deal owner filter active). */
+  quarterMetricInputByDealOwner?: Record<string, Record<string, Record<string, { monthSigned: number[]; monthForecasted: number[]; carryOver: number }>>>;
   /** Table data from Q1details sheet (array of rows, keys = normalized column headers). Shown below waterfall on Q1 tab. */
   q1DetailsTable?: Record<string, string>[];
   /** Table data from JanuaryDetails sheet (array of rows, keys = normalized column headers). Used for pop-up when clicking January bars. */
@@ -585,6 +589,84 @@ export async function loadGoogleSheetsData(): Promise<LoadedSalesData> {
         if (!byOwner[qRaw]) byOwner[qRaw] = {};
         if (!byOwner[qRaw][metricKey]) byOwner[qRaw][metricKey] = {};
         byOwner[qRaw][metricKey][ownerRaw] = (byOwner[qRaw][metricKey][ownerRaw] ?? 0) + qt;
+      }
+      return Object.keys(byOwner).length > 0 ? byOwner : undefined;
+    })(),
+    quarterMetricInputBySegment: (() => {
+      const bySegment: Record<string, Record<string, Record<string, { monthSigned: number[]; monthForecasted: number[]; carryOver: number }>>> = {};
+      for (const r of quarterMetricInputRows) {
+        const status = String((cell(r, 'status') || r.status) ?? '').trim().toLowerCase();
+        if (status !== 'signed' && status !== 'forecasted') continue;
+        const qRaw = String(((cell(r, 'quarter') || r.quarter) ?? '').trim()).toUpperCase();
+        if (!qRaw || !/^20\d{2}Q[1-4]$/.test(qRaw)) continue;
+        const metricRaw = String(((cell(r, 'metric') || r.metric) ?? '').trim()).toLowerCase();
+        const metricNorm: Record<string, QuarterProjectionMetricKey> = {
+          'clientwins': 'clientWins', 'client wins': 'clientWins', acv: 'acv', 'acv signed': 'acv',
+          'inyearrevenue': 'inYearRevenue', 'in-year revenue': 'inYearRevenue', 'in year revenue': 'inYearRevenue',
+        };
+        const metricKey = metricNorm[metricRaw] ?? metricNorm[metricRaw.replace(/-/g, ' ')];
+        if (!metricKey) continue;
+        const segmentRaw = String((cell(r, 'segment') || r.segment) ?? '').trim();
+        if (!segmentRaw) continue;
+        const m1 = num(cell(r, 'month1') || r.month1);
+        const m2 = num(cell(r, 'month2') || r.month2);
+        const m3 = num(cell(r, 'month3') || r.month3);
+        const co = num(cell(r, 'carry_over') || r.carry_over);
+        if (!bySegment[qRaw]) bySegment[qRaw] = {};
+        if (!bySegment[qRaw][metricKey]) bySegment[qRaw][metricKey] = {};
+        if (!bySegment[qRaw][metricKey][segmentRaw]) {
+          bySegment[qRaw][metricKey][segmentRaw] = { monthSigned: [0, 0, 0], monthForecasted: [0, 0, 0], carryOver: 0 };
+        }
+        const entry = bySegment[qRaw][metricKey][segmentRaw]!;
+        if (status === 'signed') {
+          entry.monthSigned[0] += m1;
+          entry.monthSigned[1] += m2;
+          entry.monthSigned[2] += m3;
+        } else {
+          entry.monthForecasted[0] += m1;
+          entry.monthForecasted[1] += m2;
+          entry.monthForecasted[2] += m3;
+        }
+        if (co > 0) entry.carryOver += co;
+      }
+      return Object.keys(bySegment).length > 0 ? bySegment : undefined;
+    })(),
+    quarterMetricInputByDealOwner: (() => {
+      const byOwner: Record<string, Record<string, Record<string, { monthSigned: number[]; monthForecasted: number[]; carryOver: number }>>> = {};
+      for (const r of quarterMetricInputRows) {
+        const status = String((cell(r, 'status') || r.status) ?? '').trim().toLowerCase();
+        if (status !== 'signed' && status !== 'forecasted') continue;
+        const qRaw = String(((cell(r, 'quarter') || r.quarter) ?? '').trim()).toUpperCase();
+        if (!qRaw || !/^20\d{2}Q[1-4]$/.test(qRaw)) continue;
+        const metricRaw = String(((cell(r, 'metric') || r.metric) ?? '').trim()).toLowerCase();
+        const metricNorm: Record<string, QuarterProjectionMetricKey> = {
+          'clientwins': 'clientWins', 'client wins': 'clientWins', acv: 'acv', 'acv signed': 'acv',
+          'inyearrevenue': 'inYearRevenue', 'in-year revenue': 'inYearRevenue', 'in year revenue': 'inYearRevenue',
+        };
+        const metricKey = metricNorm[metricRaw] ?? metricNorm[metricRaw.replace(/-/g, ' ')];
+        if (!metricKey) continue;
+        const ownerRaw = cellDealOwner(r);
+        if (!ownerRaw) continue;
+        const m1 = num(cell(r, 'month1') || r.month1);
+        const m2 = num(cell(r, 'month2') || r.month2);
+        const m3 = num(cell(r, 'month3') || r.month3);
+        const co = num(cell(r, 'carry_over') || r.carry_over);
+        if (!byOwner[qRaw]) byOwner[qRaw] = {};
+        if (!byOwner[qRaw][metricKey]) byOwner[qRaw][metricKey] = {};
+        if (!byOwner[qRaw][metricKey][ownerRaw]) {
+          byOwner[qRaw][metricKey][ownerRaw] = { monthSigned: [0, 0, 0], monthForecasted: [0, 0, 0], carryOver: 0 };
+        }
+        const entry = byOwner[qRaw][metricKey][ownerRaw]!;
+        if (status === 'signed') {
+          entry.monthSigned[0] += m1;
+          entry.monthSigned[1] += m2;
+          entry.monthSigned[2] += m3;
+        } else {
+          entry.monthForecasted[0] += m1;
+          entry.monthForecasted[1] += m2;
+          entry.monthForecasted[2] += m3;
+        }
+        if (co > 0) entry.carryOver += co;
       }
       return Object.keys(byOwner).length > 0 ? byOwner : undefined;
     })(),

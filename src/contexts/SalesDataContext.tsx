@@ -85,6 +85,10 @@ type SalesDataContextValue = {
   getCumulativeChartData: (metric: CumulativeChartMetricKey) => { actual: number[]; forecast: number[]; target: number[] } | null;
   /** Quarter waterfall: Signed/Forecasted per month from QuarterMetricInput sheet, or null to use deal-based logic */
   getQuarterMetricInput: (quarter: QuarterId, metric: QuarterProjectionMetricKey) => { monthSigned: number[]; monthForecasted: number[]; quarterTarget: number; carryOver: number } | null;
+  /** Quarter waterfall by segment: for use when segment filter is active */
+  getQuarterMetricInputForSegments: (quarter: QuarterId, metric: QuarterProjectionMetricKey, segments: string[]) => { monthSigned: number[]; monthForecasted: number[]; carryOver: number } | null;
+  /** Quarter waterfall by deal owner: for use when deal owner filter is active */
+  getQuarterMetricInputForDealOwners: (quarter: QuarterId, metric: QuarterProjectionMetricKey, owners: string[]) => { monthSigned: number[]; monthForecasted: number[]; carryOver: number } | null;
   /** Q1 details table from Q1details sheet (for Q1 tab below waterfall). */
   getQ1DetailsTable: () => Record<string, string>[];
   /** January details table from JanuaryDetails sheet (for pop-up when clicking January bars). */
@@ -355,6 +359,56 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
     [googleData]
   );
 
+  const getQuarterMetricInputForSegments = useCallback(
+    (quarter: QuarterId, metric: QuarterProjectionMetricKey, segments: string[]): { monthSigned: number[]; monthForecasted: number[]; carryOver: number } | null => {
+      if (segments.length === 0) return null;
+      const bySegment = googleData?.quarterMetricInputBySegment?.[quarter]?.[metric];
+      if (!bySegment) return null;
+      const monthSigned = [0, 0, 0];
+      const monthForecasted = [0, 0, 0];
+      let carryOver = 0;
+      for (const seg of segments) {
+        const trimmed = seg.trim();
+        const entry = bySegment[trimmed] ?? bySegment[seg];
+        if (!entry) continue;
+        monthSigned[0] += entry.monthSigned[0] ?? 0;
+        monthSigned[1] += entry.monthSigned[1] ?? 0;
+        monthSigned[2] += entry.monthSigned[2] ?? 0;
+        monthForecasted[0] += entry.monthForecasted[0] ?? 0;
+        monthForecasted[1] += entry.monthForecasted[1] ?? 0;
+        monthForecasted[2] += entry.monthForecasted[2] ?? 0;
+        carryOver += entry.carryOver ?? 0;
+      }
+      return { monthSigned, monthForecasted, carryOver };
+    },
+    [googleData]
+  );
+
+  const getQuarterMetricInputForDealOwners = useCallback(
+    (quarter: QuarterId, metric: QuarterProjectionMetricKey, owners: string[]): { monthSigned: number[]; monthForecasted: number[]; carryOver: number } | null => {
+      if (owners.length === 0) return null;
+      const byOwner = googleData?.quarterMetricInputByDealOwner?.[quarter]?.[metric];
+      if (!byOwner) return null;
+      const monthSigned = [0, 0, 0];
+      const monthForecasted = [0, 0, 0];
+      let carryOver = 0;
+      for (const owner of owners) {
+        const trimmed = owner.trim();
+        const entry = byOwner[trimmed] ?? byOwner[owner];
+        if (!entry) continue;
+        monthSigned[0] += entry.monthSigned[0] ?? 0;
+        monthSigned[1] += entry.monthSigned[1] ?? 0;
+        monthSigned[2] += entry.monthSigned[2] ?? 0;
+        monthForecasted[0] += entry.monthForecasted[0] ?? 0;
+        monthForecasted[1] += entry.monthForecasted[1] ?? 0;
+        monthForecasted[2] += entry.monthForecasted[2] ?? 0;
+        carryOver += entry.carryOver ?? 0;
+      }
+      return { monthSigned, monthForecasted, carryOver };
+    },
+    [googleData]
+  );
+
   const getQ1DetailsTable = useCallback((): Record<string, string>[] => {
     return googleData?.q1DetailsTable ?? [];
   }, [googleData]);
@@ -397,6 +451,8 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
     getQuarterDealOwnersFromSheet,
     getCumulativeChartData,
     getQuarterMetricInput,
+    getQuarterMetricInputForSegments,
+    getQuarterMetricInputForDealOwners,
     getQ1DetailsTable,
     getJanuaryDetailsTable,
     getFebruaryDetailsTable,

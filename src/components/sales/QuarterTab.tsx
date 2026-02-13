@@ -97,7 +97,7 @@ type WaterfallRow = {
 };
 
 export function QuarterTab({ tabId }: QuarterTabProps) {
-  const { getQuarterDeals, getQuarterTargets, getQuarterTargetForSegments, getQuarterTargetForDealOwners, getQuarterTargetSegmentNames, getQuarterDealOwnersFromSheet, getQuarterMetricInput, getQ1DetailsTable, getJanuaryDetailsTable, getFebruaryDetailsTable, getMarchDetailsTable } = useSalesData();
+  const { getQuarterDeals, getQuarterTargets, getQuarterTargetForSegments, getQuarterTargetForDealOwners, getQuarterTargetSegmentNames, getQuarterDealOwnersFromSheet, getQuarterMetricInput, getQuarterMetricInputForSegments, getQuarterMetricInputForDealOwners, getQ1DetailsTable, getJanuaryDetailsTable, getFebruaryDetailsTable, getMarchDetailsTable } = useSalesData();
   const quarter = tabIdToQuarter(tabId);
   const [selectedSegments, setSelectedSegments] = useState<string[]>([]);
   const [selectedOwners, setSelectedOwners] = useState<string[]>([]);
@@ -160,7 +160,17 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
   const waterfallData = useMemo((): WaterfallRow[] => {
     const labels = QUARTER_MONTH_LABELS[quarter];
     const filtersActive = selectedSegments.length > 0 || selectedOwners.length > 0;
+
+    // When no filters: use aggregated QuarterMetricInput
     const quarterMetricInput = !filtersActive ? getQuarterMetricInput(quarter, projectionMetric) : null;
+
+    // When filters active: try segment/deal-owner filtered QuarterMetricInput first (has Signed/Forecasted by segment)
+    const filteredMetricInput =
+      filtersActive && selectedOwners.length > 0
+        ? getQuarterMetricInputForDealOwners(quarter, projectionMetric, selectedOwners)
+        : filtersActive && selectedSegments.length > 0
+          ? getQuarterMetricInputForSegments(quarter, projectionMetric, selectedSegments)
+          : null;
 
     let monthSigned: number[];
     let monthForecasted: number[];
@@ -184,6 +194,17 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                   ? targets.acv
                   : targets.inYearRevenue;
             })();
+    } else if (filteredMetricInput) {
+      monthSigned = filteredMetricInput.monthSigned;
+      monthForecasted = filteredMetricInput.monthForecasted;
+      effectiveCarryOver = filteredMetricInput.carryOver ?? 0;
+      if (selectedOwners.length > 0) {
+        targetValue = getQuarterTargetForDealOwners(quarter, projectionMetric, selectedOwners);
+      } else {
+        targetValue = getQuarterTargetForSegments(quarter, projectionMetric, selectedSegments);
+      }
+      if (projectionMetric === 'clientWins') targetValue = Math.round(targetValue);
+      else targetValue = Math.round(targetValue / 1000) * 1000;
     } else {
       effectiveCarryOver = carryOver;
       const monthNums = QUARTER_MONTH_NUMS[quarter];
@@ -268,12 +289,14 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
     quarter,
     deals,
     allDeals,
-    selectedSegments.length,
-    selectedOwners.length,
+    selectedSegments,
+    selectedOwners,
     projectionMetric,
     asOfDate,
     carryOver,
     getQuarterMetricInput,
+    getQuarterMetricInputForSegments,
+    getQuarterMetricInputForDealOwners,
     getQuarterTargets,
     getQuarterTargetForSegments,
     getQuarterTargetForDealOwners,
@@ -626,6 +649,20 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
           return (n.includes('latest') && (n.includes('nextstep') || n.includes('nextsteps'))) || n === 'latestnextsteps';
         };
 
+        const allColumns = Object.keys(q1DetailsTable[0]);
+
+        // Find segment column (e.g. "segment", "Segment")
+        const segmentCol = allColumns.find(col => {
+          const n = col.toLowerCase().replace(/[\s_]+/g, '');
+          return n === 'segment';
+        });
+
+        // Find deal owner column (e.g. "deal owner", "deal_owner", "dealowner")
+        const dealOwnerCol = allColumns.find(col => {
+          const n = col.toLowerCase().replace(/[\s_]+/g, '');
+          return n === 'dealowner' || n === 'deal_owner' || (n.includes('deal') && n.includes('owner'));
+        });
+
         // Check if a value is numeric
         const isNumeric = (value: string): boolean => {
           if (!value || value.trim() === '') return false;
@@ -641,7 +678,6 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
           return num.toLocaleString('en-US');
         };
 
-        const allColumns = Object.keys(q1DetailsTable[0]);
         const displayColumns = allColumns.filter(col => !isLatestNextStepsColumn(col));
         const latestNextStepsCol = allColumns.find(col => isLatestNextStepsColumn(col));
 
@@ -689,6 +725,21 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
           return true;
         });
 
+        // Apply segment and deal owner filters (same as waterfall)
+        let rowsToShow = filteredRows;
+        if (segmentCol && selectedSegments.length > 0) {
+          rowsToShow = rowsToShow.filter(row => {
+            const val = (row[segmentCol] ?? '').trim();
+            return selectedSegments.includes(val);
+          });
+        }
+        if (dealOwnerCol && selectedOwners.length > 0) {
+          rowsToShow = rowsToShow.filter(row => {
+            const val = (row[dealOwnerCol] ?? '').trim();
+            return selectedOwners.includes(val);
+          });
+        }
+
         return (
           <div className="sales-accounts-table-wrap sales-chart-card">
             <div className="sales-accounts-table-meta">Q1 details (click a row to view Latest / Next Steps)</div>
@@ -704,7 +755,7 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.map((row, i) => {
+                  {rowsToShow.map((row, i) => {
                     const nextStepsValue = latestNextStepsCol ? (row[latestNextStepsCol] ?? '').toString().trim() : '';
                     const hasAllColumns = allColumns.every(col => col in row);
                     if (!hasAllColumns) {
@@ -757,7 +808,7 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                   })}
                   {(() => {
                     const numericColumns = displayColumns.filter(key =>
-                      filteredRows.some(row => {
+                      rowsToShow.some(row => {
                         const value = (row[key] ?? '').toString().trim();
                         return isNumeric(value) && !value.includes('%');
                       })
@@ -770,7 +821,7 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                         {displayColumns.map((key, colIndex) => {
                           const isNumericCol = numericColumns.includes(key);
                           if (isNumericCol) {
-                            const total = filteredRows.reduce((sum, row) => {
+                            const total = rowsToShow.reduce((sum, row) => {
                               const val = (row[key] ?? '').toString().trim();
                               if (isNumeric(val) && !val.includes('%')) {
                                 return sum + parseFloat(val.replace(/[,$]/g, ''));
