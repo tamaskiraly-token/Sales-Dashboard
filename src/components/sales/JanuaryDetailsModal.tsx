@@ -1,26 +1,10 @@
 import { useMemo } from 'react';
-import type { QuarterProjectionMetric } from './QuarterTab';
 
 interface MonthDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
   data: Record<string, string>[];
-  selectedMetric: QuarterProjectionMetric;
   month: 'Jan' | 'Feb' | 'Mar';
-}
-
-/** Map metric to Type column values in the Google Sheet - returns possible variations */
-function getMetricTypeFilters(metric: QuarterProjectionMetric): string[] {
-  switch (metric) {
-    case 'clientWins':
-      return ['Client Wins', 'Client wins', 'client wins', 'CLIENT WINS'];
-    case 'acv':
-      return ['ACV Signed', 'ACV signed', 'acv signed', 'ACV SIGNED'];
-    case 'inYearRevenue':
-      return ['In-Year Revenue', 'In-year revenue', 'in-year revenue', 'In-Year revenue', 'IN-YEAR REVENUE'];
-    default:
-      return [];
-  }
 }
 
 /** Format header name with proper spacing (e.g., "CLIENTNAME" -> "Client Name", "ACV($)" -> "ACV ($)") */
@@ -97,88 +81,20 @@ function getColumnDisplayName(key: string): string {
   return formatHeaderName(key);
 }
 
-/** Check if a column should be excluded from display */
-function shouldExcludeColumn(key: string, selectedMetric: QuarterProjectionMetric): boolean {
-  const normalized = key.toLowerCase().replace(/[\s_]+/g, '').replace(/[()$]/g, '');
-  const originalKey = key.toLowerCase();
-  
-  // Always exclude Type column
-  if (normalized === 'type') return true;
-  
-  // Always include Commitment Status column (show in all metric views)
-  // Check for various possible column name formats: "commitmentstatus", "commitment_status", "commitment status", etc.
-  // Match if it contains both "commitment" (or "commit") and "status" (or "stat")
-  const hasCommitment = normalized.includes('commitment') || normalized.includes('commit') || originalKey.includes('commitment') || originalKey.includes('commit');
-  const hasStatus = normalized.includes('status') || normalized.includes('stat') || originalKey.includes('status') || originalKey.includes('stat');
-  
-  if (hasCommitment && hasStatus) {
-    return false; // Always show Commitment Status
-  }
-  
-  // Hide In-year revenue column when Client Wins or ACV Signed is selected
-  if (selectedMetric === 'clientWins' || selectedMetric === 'acv') {
-    if (normalized.includes('inyear') || normalized.includes('in-year') || normalized.includes('inyearrevenue')) {
-      return true;
-    }
-  }
-  
-  // Hide ACV and Expected monthly transactions columns when In-Year Revenue is selected
-  if (selectedMetric === 'inYearRevenue') {
-    if (normalized.includes('acv') && !normalized.includes('inyear')) {
-      return true;
-    }
-    if (normalized.includes('expected') && (normalized.includes('month') || normalized.includes('transaction'))) {
-      return true;
-    }
-  }
-  
-  return false;
-}
+/** Columns are shown as-is from the sheet; no filtering by metric */
 
 export function MonthDetailsModal({
   isOpen,
   onClose,
   data,
-  selectedMetric,
   month,
 }: MonthDetailsModalProps) {
-  const filteredData = useMemo(() => {
+  const tableData = useMemo(() => {
     if (!data || data.length === 0) return [];
-    
-    // Debug: log available columns
-    if (data.length > 0) {
-      console.log(`[MonthDetailsModal-${month}] Available columns:`, Object.keys(data[0]));
-    }
-    
-    const typeFilters = getMetricTypeFilters(selectedMetric);
-    if (typeFilters.length === 0) return data;
-    
-    // Find the Type column - CSV parser normalizes headers to lowercase, removes spaces
-    // "Type" becomes "type"
-    const typeColumnKey = Object.keys(data[0] || {}).find(
-      key => key.toLowerCase().replace(/[\s_]+/g, '') === 'type'
-    ) || 'type';
-    
-    // Filter rows where the "Type" column matches the selected metric
-    return data.filter((row) => {
-      const typeValue = (row[typeColumnKey] || '').trim();
-      if (!typeValue) return false;
-      
-      // Case-insensitive comparison against all possible filter variations
-      return typeFilters.some(filter => 
-        typeValue.toLowerCase() === filter.toLowerCase()
-      );
-    });
-  }, [data, selectedMetric, month]);
+    return data;
+  }, [data]);
 
   if (!isOpen) return null;
-
-  const metricLabel =
-    selectedMetric === 'clientWins'
-      ? 'Client Wins'
-      : selectedMetric === 'acv'
-        ? 'ACV Signed'
-        : 'In-Year Revenue';
 
   return (
     <div
@@ -231,7 +147,7 @@ export function MonthDetailsModal({
                 color: 'var(--sales-text)',
               }}
             >
-              {month === 'Jan' ? 'January' : month === 'Feb' ? 'February' : 'March'} Details - {metricLabel}
+              {month === 'Jan' ? 'January' : month === 'Feb' ? 'February' : 'March'} Details
             </h2>
             <p
               style={{
@@ -240,7 +156,7 @@ export function MonthDetailsModal({
                 color: 'var(--sales-text-secondary)',
               }}
             >
-              Showing {filteredData.length} row{filteredData.length !== 1 ? 's' : ''}
+              Showing {tableData.length} row{tableData.length !== 1 ? 's' : ''}
             </p>
           </div>
           <button
@@ -272,98 +188,53 @@ export function MonthDetailsModal({
             padding: '24px',
           }}
         >
-          {filteredData.length === 0 ? (
+          {tableData.length === 0 ? (
             <div
               style={{
                 padding: '40px',
                 color: 'var(--sales-text-secondary)',
+                textAlign: 'center',
               }}
             >
-              <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-                No filtered data available for {month === 'Jan' ? 'January' : month === 'Feb' ? 'February' : 'March'} {metricLabel}
-              </div>
-              {data.length > 0 && (
-                <div style={{ marginTop: '20px' }}>
-                  <p style={{ fontWeight: 600, marginBottom: '10px' }}>Debug: Showing all data ({data.length} rows):</p>
-                  <div className="sales-accounts-table-scroll">
-                    <table className="sales-accounts-table">
-                      <thead>
-                        <tr>
-                          {Object.keys(data[0])
-                            .filter(key => !shouldExcludeColumn(key, selectedMetric))
-                            .map((key) => (
-                              <th key={key}>{getColumnDisplayName(key)}</th>
-                            ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {data.slice(0, 5).map((row, i) => (
-                          <tr key={i}>
-                            {Object.keys(data[0])
-                              .filter(key => !shouldExcludeColumn(key, selectedMetric))
-                              .map((key) => {
-                                const value = row[key] ?? '';
-                                return (
-                                  <td key={key}>
-                                    {isNumeric(value) ? formatNumber(value) : value}
-                                  </td>
-                                );
-                              })}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {data.length > 5 && <p style={{ marginTop: '10px', fontSize: '12px' }}>... showing first 5 of {data.length} rows</p>}
-                  </div>
-                </div>
-              )}
+              No data available for {month === 'Jan' ? 'January' : month === 'Feb' ? 'February' : 'March'}
             </div>
           ) : (
             <div className="sales-accounts-table-scroll">
               <table className="sales-accounts-table">
                 <thead>
                   <tr>
-                    {(() => {
-                      const visibleColumns = Object.keys(filteredData[0])
-                        .filter(key => !shouldExcludeColumn(key, selectedMetric));
-                      console.log(`[MonthDetailsModal-${month}] Visible columns:`, visibleColumns);
-                      console.log(`[MonthDetailsModal-${month}] All columns:`, Object.keys(filteredData[0]));
-                      return visibleColumns.map((key) => (
-                        <th key={key}>{getColumnDisplayName(key)}</th>
-                      ));
-                    })()}
+                    {Object.keys(tableData[0]).map((key) => (
+                      <th key={key}>{getColumnDisplayName(key)}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredData.map((row, i) => (
+                  {tableData.map((row, i) => (
                     <tr key={i}>
-                      {Object.keys(filteredData[0])
-                        .filter(key => !shouldExcludeColumn(key, selectedMetric))
-                        .map((key) => {
-                          const value = row[key] ?? '';
-                          return (
-                            <td key={key}>
-                              {isNumeric(value) ? formatNumber(value) : value}
-                            </td>
-                          );
-                        })}
+                      {Object.keys(tableData[0]).map((key) => {
+                        const value = row[key] ?? '';
+                        return (
+                          <td key={key}>
+                            {isNumeric(value) ? formatNumber(value) : value}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                   {(() => {
-                    // Calculate totals for numeric columns
-                    const visibleColumns = Object.keys(filteredData[0]).filter(key => !shouldExcludeColumn(key, selectedMetric));
-                    const numericColumns = visibleColumns.filter(key => {
-                      return filteredData.some(row => isNumeric(row[key] ?? ''));
+                    const columns = Object.keys(tableData[0]);
+                    const numericColumns = columns.filter(key => {
+                      return tableData.some(row => isNumeric(row[key] ?? ''));
                     });
 
                     if (numericColumns.length === 0) return null;
 
                     return (
                       <tr style={{ fontWeight: 700, backgroundColor: 'var(--sales-accent-soft)' }}>
-                        {visibleColumns.map((key) => {
+                        {columns.map((key) => {
                           const isNumericCol = numericColumns.includes(key);
                           if (isNumericCol) {
-                            const total = filteredData.reduce((sum, row) => {
+                            const total = tableData.reduce((sum, row) => {
                               const val = row[key] ?? '';
                               if (isNumeric(val)) {
                                 return sum + parseFloat(val.replace(/[,$]/g, ''));
@@ -376,8 +247,7 @@ export function MonthDetailsModal({
                               </td>
                             );
                           }
-                          // For non-numeric columns, show "Total" in first column, empty for others
-                          const isFirstColumn = visibleColumns.indexOf(key) === 0;
+                          const isFirstColumn = columns.indexOf(key) === 0;
                           return (
                             <td key={key} style={{ fontWeight: 700, textAlign: isFirstColumn ? 'right' : 'left' }}>
                               {isFirstColumn ? 'Total' : ''}

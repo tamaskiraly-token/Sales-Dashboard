@@ -875,6 +875,38 @@
   background: rgba(30, 27, 75, 0.04);
 }
 
+/* Q1 details table: compact layout so columns fit on screen */
+.sales-q1-table-scroll {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: min(70vh, 480px);
+}
+
+.sales-q1-details-table {
+  table-layout: fixed;
+  width: 100%;
+  min-width: fit-content;
+  font-size: 12px;
+}
+
+.sales-q1-details-table th,
+.sales-q1-details-table td {
+  padding: 6px 10px;
+  white-space: normal;
+  word-wrap: break-word;
+  line-height: 1.35;
+  min-width: 60px;
+  max-width: 180px;
+}
+
+.sales-q1-details-table th {
+  font-size: 11px;
+}
+
+.sales-q1-details-row:hover {
+  background: rgba(30, 27, 75, 0.06);
+}
+
 .sales-accounts-cell-name {
   font-weight: 600;
   color: var(--sales-text);

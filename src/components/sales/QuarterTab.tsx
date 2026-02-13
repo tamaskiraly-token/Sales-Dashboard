@@ -17,6 +17,7 @@ import type { QuarterId, QuarterDeal } from '../../data/salesMockData';
 import { SegmentMultiselect } from './SegmentMultiselect';
 import { DealOwnerMultiselect } from './DealOwnerMultiselect';
 import { MonthDetailsModal } from './JanuaryDetailsModal';
+import { NextStepsModal } from './NextStepsModal';
 
 const QUARTER_MONTH_LABELS: Record<QuarterId, [string, string, string]> = {
   '2026Q1': ['Jan', 'Feb', 'Mar'],
@@ -104,6 +105,7 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
   const [isJanuaryModalOpen, setIsJanuaryModalOpen] = useState(false);
   const [isFebruaryModalOpen, setIsFebruaryModalOpen] = useState(false);
   const [isMarchModalOpen, setIsMarchModalOpen] = useState(false);
+  const [nextStepsModalContent, setNextStepsModalContent] = useState<string | null>(null);
 
   const allDeals = useMemo(() => getQuarterDeals(quarter), [quarter, getQuarterDeals]);
   const dealOwners = useMemo(() => {
@@ -610,11 +612,18 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
         const formatHeaderName = (key: string): string => {
           return key
             .replace(/_/g, ' ')
-            .replace(/([a-z])([A-Z])/g, '$1 $2') // Add space before capital letters
-            .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2') // Split consecutive capitals
+            .replace(/\//g, ' / ')
+            .replace(/([a-z])([A-Z])/g, '$1 $2')
+            .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
             .split(' ')
             .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
             .join(' ');
+        };
+
+        // Check if column is "Latest / Next Steps" (various sheet naming conventions)
+        const isLatestNextStepsColumn = (key: string): boolean => {
+          const n = key.toLowerCase().replace(/[\s_\/]+/g, '');
+          return (n.includes('latest') && (n.includes('nextstep') || n.includes('nextsteps'))) || n === 'latestnextsteps';
         };
 
         // Check if a value is numeric
@@ -632,11 +641,13 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
           return num.toLocaleString('en-US');
         };
 
-        const columns = Object.keys(q1DetailsTable[0]);
-        
-        // Find the FY26ARRFORECAST column index for validation
-        const arrForecastColIndex = columns.findIndex(col => 
-          col.toLowerCase().includes('fy26arrforecast') || 
+        const allColumns = Object.keys(q1DetailsTable[0]);
+        const displayColumns = allColumns.filter(col => !isLatestNextStepsColumn(col));
+        const latestNextStepsCol = allColumns.find(col => isLatestNextStepsColumn(col));
+
+        // Find the FY26ARRFORECAST column index for validation (among display columns)
+        const arrForecastColIndex = displayColumns.findIndex(col =>
+          col.toLowerCase().includes('fy26arrforecast') ||
           col.toLowerCase().includes('arrforecast') ||
           col.toLowerCase().includes('fy26arr')
         );
@@ -650,57 +661,43 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
         
         const filteredRows = q1DetailsTable.filter((row) => {
           // Skip if it's likely a header row (values match column names)
-          const matchingColumns = columns.filter(col => {
+          const matchingColumns = allColumns.filter(col => {
             const rowValue = (row[col] ?? '').toLowerCase().trim();
             const colName = col.toLowerCase().trim();
             return rowValue === colName || rowValue === formatHeaderName(col).toLowerCase().trim();
           });
-          
-          // If more than 50% of values match column names, it's likely a header row
-          if (matchingColumns.length > columns.length * 0.5) {
+
+          if (matchingColumns.length > allColumns.length * 0.5) {
             return false;
           }
-          
-          // Check if row contains common sub-header patterns
-          const rowValues = columns.map(col => (row[col] ?? '').toLowerCase().trim()).join(' ');
-          const hasSubHeaderPattern = subHeaderPatterns.some(pattern => 
+
+          const rowValues = allColumns.map(col => (row[col] ?? '').toLowerCase().trim()).join(' ');
+          const hasSubHeaderPattern = subHeaderPatterns.some(pattern =>
             rowValues.includes(pattern)
           );
-          
-          // If row has sub-header patterns and few or no numeric values, skip it
+
           if (hasSubHeaderPattern) {
-            const numericValues = columns.filter(col => {
+            const numericValues = allColumns.filter(col => {
               const value = row[col] ?? '';
               return isNumeric(value);
             });
-            // If less than 20% of columns have numeric values, it's likely a sub-header
-            if (numericValues.length < columns.length * 0.2) {
+            if (numericValues.length < allColumns.length * 0.2) {
               return false;
             }
           }
-          
+
           return true;
         });
 
         return (
           <div className="sales-accounts-table-wrap sales-chart-card">
-            <div className="sales-accounts-table-meta">Q1 details</div>
-            <div className="sales-accounts-table-scroll">
-              <table className="sales-accounts-table" style={{ tableLayout: 'auto' }}>
+            <div className="sales-accounts-table-meta">Q1 details (click a row to view Latest / Next Steps)</div>
+            <div className="sales-accounts-table-scroll sales-q1-table-scroll">
+              <table className="sales-accounts-table sales-q1-details-table">
                 <thead>
                   <tr>
-                    {columns.map((key) => (
-                      <th 
-                        key={key}
-                        style={{
-                          whiteSpace: 'normal',
-                          wordWrap: 'break-word',
-                          maxWidth: '200px',
-                          minWidth: '100px',
-                          lineHeight: '1.4',
-                          verticalAlign: 'top',
-                        }}
-                      >
+                    {displayColumns.map((key) => (
+                      <th key={key} className="sales-q1-details-th">
                         {formatHeaderName(key)}
                       </th>
                     ))}
@@ -708,44 +705,44 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                 </thead>
                 <tbody>
                   {filteredRows.map((row, i) => {
-                    // Validate row has all expected columns
-                    const hasAllColumns = columns.every(col => col in row);
+                    const nextStepsValue = latestNextStepsCol ? (row[latestNextStepsCol] ?? '').toString().trim() : '';
+                    const hasAllColumns = allColumns.every(col => col in row);
                     if (!hasAllColumns) {
-                      console.warn(`[Q1DetailsTable] Row ${i} missing columns:`, 
-                        columns.filter(col => !(col in row))
+                      console.warn(`[Q1DetailsTable] Row ${i} missing columns:`,
+                        allColumns.filter(col => !(col in row))
                       );
                     }
-                    
-                    // Debug: Check FY26ARRFORECAST column alignment
+
                     if (arrForecastColIndex >= 0 && i < 3) {
-                      const arrForecastKey = columns[arrForecastColIndex];
+                      const arrForecastKey = displayColumns[arrForecastColIndex];
                       const arrForecastValue = row[arrForecastKey];
-                      const nextColValue = columns[arrForecastColIndex + 1] ? row[columns[arrForecastColIndex + 1]] : null;
+                      const nextColValue = displayColumns[arrForecastColIndex + 1] ? row[displayColumns[arrForecastColIndex + 1]] : null;
                       if (arrForecastValue && !isNumeric(arrForecastValue) && nextColValue && isNumeric(nextColValue)) {
-                        console.warn(`[Q1DetailsTable] Row ${i}: Possible misalignment detected. FY26ARRFORECAST="${arrForecastValue}", Next column="${nextColValue}"`);
+                        console.warn(`[Q1DetailsTable] Row ${i}: Possible misalignment detected.`);
                       }
                     }
-                    
+
                     return (
-                      <tr key={i}>
-                        {columns.map((key, colIndex) => {
+                      <tr
+                        key={i}
+                        className="sales-q1-details-row"
+                        onClick={() => setNextStepsModalContent(nextStepsValue)}
+                        style={{ cursor: 'pointer' }}
+                        title="Click to view Latest / Next Steps"
+                      >
+                        {displayColumns.map((key, colIndex) => {
                           const value = (row[key] ?? '').toString().trim();
-                          const formattedValue = isNumeric(value) && !value.includes('%') 
-                            ? formatNumber(value) 
+                          const formattedValue = isNumeric(value) && !value.includes('%')
+                            ? formatNumber(value)
                             : value;
-                          
-                          // Highlight potential misaligned ARR Forecast values
                           const isArrForecastCol = colIndex === arrForecastColIndex;
                           const mightBeMisaligned = isArrForecastCol && value && !isNumeric(value) && value.length > 0;
-                          
+
                           return (
-                            <td 
+                            <td
                               key={key}
+                              className="sales-q1-details-td"
                               style={{
-                                whiteSpace: 'normal',
-                                wordWrap: 'break-word',
-                                maxWidth: '200px',
-                                verticalAlign: 'top',
                                 textAlign: isNumeric(value) && !value.includes('%') ? 'right' : 'left',
                                 backgroundColor: mightBeMisaligned ? 'rgba(255, 200, 0, 0.1)' : 'transparent',
                               }}
@@ -759,19 +756,18 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                     );
                   })}
                   {(() => {
-                    // Calculate totals for numeric columns
-                    const numericColumns = columns.filter(key => {
-                      return filteredRows.some(row => {
+                    const numericColumns = displayColumns.filter(key =>
+                      filteredRows.some(row => {
                         const value = (row[key] ?? '').toString().trim();
                         return isNumeric(value) && !value.includes('%');
-                      });
-                    });
+                      })
+                    );
 
                     if (numericColumns.length === 0) return null;
 
                     return (
                       <tr style={{ fontWeight: 700, backgroundColor: 'var(--sales-accent-soft)' }}>
-                        {columns.map((key, colIndex) => {
+                        {displayColumns.map((key, colIndex) => {
                           const isNumericCol = numericColumns.includes(key);
                           if (isNumericCol) {
                             const total = filteredRows.reduce((sum, row) => {
@@ -782,35 +778,14 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                               return sum;
                             }, 0);
                             return (
-                              <td 
-                                key={key}
-                                style={{ 
-                                  fontWeight: 700,
-                                  textAlign: 'right',
-                                  whiteSpace: 'normal',
-                                  wordWrap: 'break-word',
-                                  maxWidth: '200px',
-                                  verticalAlign: 'top',
-                                }}
-                              >
+                              <td key={key} className="sales-q1-details-td" style={{ fontWeight: 700, textAlign: 'right' }}>
                                 {formatNumber(total.toString())}
                               </td>
                             );
                           }
-                          // For non-numeric columns, show "Total" in first column, empty for others
                           const isFirstColumn = colIndex === 0;
                           return (
-                            <td 
-                              key={key}
-                              style={{ 
-                                fontWeight: 700,
-                                textAlign: isFirstColumn ? 'right' : 'left',
-                                whiteSpace: 'normal',
-                                wordWrap: 'break-word',
-                                maxWidth: '200px',
-                                verticalAlign: 'top',
-                              }}
-                            >
+                            <td key={key} className="sales-q1-details-td" style={{ fontWeight: 700, textAlign: isFirstColumn ? 'right' : 'left' }}>
                               {isFirstColumn ? 'Total' : ''}
                             </td>
                           );
@@ -827,25 +802,27 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
 
       {quarter === '2026Q1' && (
         <>
+          <NextStepsModal
+            isOpen={nextStepsModalContent !== null}
+            onClose={() => setNextStepsModalContent(null)}
+            content={nextStepsModalContent ?? ''}
+          />
           <MonthDetailsModal
             isOpen={isJanuaryModalOpen}
             onClose={() => setIsJanuaryModalOpen(false)}
             data={januaryDetailsTable}
-            selectedMetric={projectionMetric}
             month="Jan"
           />
           <MonthDetailsModal
             isOpen={isFebruaryModalOpen}
             onClose={() => setIsFebruaryModalOpen(false)}
             data={februaryDetailsTable}
-            selectedMetric={projectionMetric}
             month="Feb"
           />
           <MonthDetailsModal
             isOpen={isMarchModalOpen}
             onClose={() => setIsMarchModalOpen(false)}
             data={marchDetailsTable}
-            selectedMetric={projectionMetric}
             month="Mar"
           />
         </>
