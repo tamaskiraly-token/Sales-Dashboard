@@ -901,6 +901,10 @@
 
 .sales-q1-details-table th {
   font-size: 11px;
+  text-align: center;
+  text-transform: none;
+  letter-spacing: 0;
+  vertical-align: middle;
 }
 
 .sales-q1-details-row:hover {

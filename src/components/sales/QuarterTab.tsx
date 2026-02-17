@@ -119,6 +119,133 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
   const februaryDetailsTable = useMemo(() => getFebruaryDetailsTable(), [getFebruaryDetailsTable]);
   const marchDetailsTable = useMemo(() => getMarchDetailsTable(), [getMarchDetailsTable]);
 
+  const normalizeHeaderKey = (key: string): string => key.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+  // Use exact, spaced labels for known columns (so acronyms like ACV / FY26 stay intact)
+  const HEADER_LABEL_OVERRIDES: Record<string, string> = {
+    q1pipeline: 'Q1 Pipeline',
+    acv: 'ACV',
+    fy26arrforecast: 'FY26 ARR Forecast',
+    confidenceq1close: 'Confidence Q1 Close',
+    weightedacv: 'Weighted ACV',
+    status: 'Status',
+    dealowner: 'Deal Owner',
+    segment: 'Segment',
+    monthclose: 'Month close',
+  };
+
+  const formatHeaderName = (key: string): string => {
+    const override = HEADER_LABEL_OVERRIDES[normalizeHeaderKey(key)];
+    if (override) return override;
+
+    return key
+      .replace(/_/g, ' ')
+      .replace(/\//g, ' / ')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
+      .split(' ')
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+  };
+
+  const q1DetailsView = useMemo(() => {
+    if (quarter !== '2026Q1') return null;
+    if (!q1DetailsTable || q1DetailsTable.length === 0) return null;
+
+    // Check if column is "Latest / Next Steps" (various sheet naming conventions)
+    const isLatestNextStepsColumn = (key: string): boolean => {
+      const n = key.toLowerCase().replace(/[\s_\/]+/g, '');
+      return (n.includes('latest') && (n.includes('nextstep') || n.includes('nextsteps'))) || n === 'latestnextsteps';
+    };
+
+    // Check if a value is numeric
+    const isNumeric = (value: string): boolean => {
+      if (!value || value.trim() === '') return false;
+      const cleaned = value.replace(/[,$%]/g, '').trim();
+      return !isNaN(Number(cleaned)) && cleaned !== '';
+    };
+
+    const allColumns = Object.keys(q1DetailsTable[0]);
+
+    // Find segment column (e.g. "segment", "Segment")
+    const segmentCol = allColumns.find((col) => normalizeHeaderKey(col) === 'segment');
+
+    // Find deal owner column (e.g. "deal owner", "deal_owner", "dealowner")
+    const dealOwnerCol = allColumns.find((col) => {
+      const n = normalizeHeaderKey(col);
+      return n === 'dealowner' || (n.includes('deal') && n.includes('owner'));
+    });
+
+    const latestNextStepsCol = allColumns.find((col) => isLatestNextStepsColumn(col));
+    const displayColumns = allColumns.filter((col) => !isLatestNextStepsColumn(col));
+
+    const monthCloseCol = allColumns.find((col) => normalizeHeaderKey(col) === 'monthclose');
+    const statusCol = allColumns.find((col) => normalizeHeaderKey(col) === 'status');
+    const acvCol = allColumns.find((col) => normalizeHeaderKey(col) === 'acv');
+    const weightedAcvCol = allColumns.find((col) => normalizeHeaderKey(col) === 'weightedacv');
+    const fy26ArrForecastCol = allColumns.find((col) => normalizeHeaderKey(col) === 'fy26arrforecast');
+    const confidenceCol = allColumns.find((col) => normalizeHeaderKey(col) === 'confidenceq1close');
+
+    // Find the FY26ARRFORECAST column index for validation (among display columns)
+    const arrForecastColIndex = displayColumns.findIndex((col) => {
+      const n = normalizeHeaderKey(col);
+      return n.includes('fy26arrforecast') || n.includes('arrforecast') || n.includes('fy26arr');
+    });
+
+    // Filter out rows that look like headers or sub-headers
+    const subHeaderPatterns = ['y/n', 'yes/no', 'latest', 'next steps', 'steps', 'header', 'sub-header', 'subheader'];
+
+    const filteredRows = q1DetailsTable.filter((row) => {
+      const matchingColumns = allColumns.filter((col) => {
+        const rowValue = (row[col] ?? '').toLowerCase().trim();
+        const colName = col.toLowerCase().trim();
+        return rowValue === colName || rowValue === formatHeaderName(col).toLowerCase().trim();
+      });
+
+      if (matchingColumns.length > allColumns.length * 0.5) {
+        return false;
+      }
+
+      const rowValues = allColumns.map((col) => (row[col] ?? '').toLowerCase().trim()).join(' ');
+      const hasSubHeaderPattern = subHeaderPatterns.some((pattern) => rowValues.includes(pattern));
+
+      if (hasSubHeaderPattern) {
+        const numericValues = allColumns.filter((col) => isNumeric(row[col] ?? ''));
+        if (numericValues.length < allColumns.length * 0.2) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+
+    // Apply segment and deal owner filters (same as waterfall)
+    let rowsToShow = filteredRows;
+    if (segmentCol && selectedSegments.length > 0) {
+      rowsToShow = rowsToShow.filter((row) => selectedSegments.includes((row[segmentCol] ?? '').trim()));
+    }
+    if (dealOwnerCol && selectedOwners.length > 0) {
+      rowsToShow = rowsToShow.filter((row) => selectedOwners.includes((row[dealOwnerCol] ?? '').trim()));
+    }
+
+    return {
+      allColumns,
+      displayColumns,
+      latestNextStepsCol,
+      segmentCol,
+      dealOwnerCol,
+      monthCloseCol,
+      statusCol,
+      acvCol,
+      weightedAcvCol,
+      fy26ArrForecastCol,
+      confidenceCol,
+      arrForecastColIndex,
+      rowsToShow,
+    };
+  }, [quarter, q1DetailsTable, selectedSegments, selectedOwners]);
+
   const segmentOptions = useMemo(() => {
     const fromDeals = Array.from(new Set(allDeals.map((d) => d.segment).filter(Boolean)));
     const fromTargets = getQuarterTargetSegmentNames(quarter);
@@ -165,12 +292,22 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
     const quarterMetricInput = !filtersActive ? getQuarterMetricInput(quarter, projectionMetric) : null;
 
     // When filters active: try segment/deal-owner filtered QuarterMetricInput first (has Signed/Forecasted by segment)
-    const filteredMetricInput =
+    const filteredMetricInputRaw =
       filtersActive && selectedOwners.length > 0
         ? getQuarterMetricInputForDealOwners(quarter, projectionMetric, selectedOwners)
         : filtersActive && selectedSegments.length > 0
           ? getQuarterMetricInputForSegments(quarter, projectionMetric, selectedSegments)
           : null;
+
+    // If the sheet-based filtered metric exists but sums to all zeros (e.g. missing key),
+    // fall back to deal-based logic (and for Q1, to the Q1 details table).
+    const filteredMetricInput =
+      filteredMetricInputRaw &&
+      (filteredMetricInputRaw.monthSigned.some((v) => v !== 0) ||
+        filteredMetricInputRaw.monthForecasted.some((v) => v !== 0) ||
+        (filteredMetricInputRaw.carryOver ?? 0) !== 0)
+        ? filteredMetricInputRaw
+        : null;
 
     let monthSigned: number[];
     let monthForecasted: number[];
@@ -212,19 +349,102 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
       monthSigned = [];
       monthForecasted = [];
 
-      for (let i = 0; i < 3; i++) {
-        const monthNum = monthNums[i];
-        const monthPrefix = `${year}-${String(monthNum).padStart(2, '0')}`;
-        const dealsInMonth = deals.filter((d) => d.closeDate.startsWith(monthPrefix));
-        let signed = 0;
-        let forecasted = 0;
-        for (const d of dealsInMonth) {
-          const v = getMetricFromDeal(d, projectionMetric);
-          if (d.closeDate <= asOfDate) signed += v;
-          else forecasted += v;
+      const parseCompactNumber = (raw: string): number => {
+        const s = String(raw ?? '').trim();
+        if (!s) return 0;
+        const cleaned = s.replace(/[$,]/g, '').replace(/\s+/g, '').trim();
+        const m = cleaned.match(/^(-?\d+(?:\.\d+)?)([kKmM])?$/);
+        if (m) {
+          const base = Number(m[1]);
+          const suffix = (m[2] ?? '').toLowerCase();
+          if (!Number.isFinite(base)) return 0;
+          if (suffix === 'k') return base * 1_000;
+          if (suffix === 'm') return base * 1_000_000;
+          return base;
         }
-        monthSigned.push(signed);
-        monthForecasted.push(forecasted);
+        // fallback: strip anything non-numeric-ish
+        const fallback = Number(cleaned.replace(/[^0-9.\-]/g, ''));
+        return Number.isFinite(fallback) ? fallback : 0;
+      };
+
+      const parseMonthIndex = (raw: string): number | null => {
+        const s = String(raw ?? '').trim().toLowerCase();
+        if (!s) return null;
+        if (s.startsWith('jan')) return 0;
+        if (s.startsWith('feb')) return 1;
+        if (s.startsWith('mar')) return 2;
+        // numeric month (1/2/3) or YYYY-MM-...
+        const dateLike = s.match(/^(\d{4})-(\d{2})/);
+        if (dateLike) {
+          const mm = parseInt(dateLike[2], 10);
+          if (mm === 1) return 0;
+          if (mm === 2) return 1;
+          if (mm === 3) return 2;
+          return null;
+        }
+        const n = parseInt(s, 10);
+        if (n === 1) return 0;
+        if (n === 2) return 1;
+        if (n === 3) return 2;
+        return null;
+      };
+
+      const isSignedStatus = (raw: string): boolean => {
+        const s = String(raw ?? '').toLowerCase().replace(/\s+/g, '');
+        if (!s) return false;
+        return s.includes('signed') || s.includes('closedwon') || (s.includes('closed') && s.includes('won')) || s === 'won';
+      };
+
+      const useQ1DetailsFallback =
+        quarter === '2026Q1' &&
+        deals.length === 0 &&
+        q1DetailsView?.rowsToShow &&
+        q1DetailsView.rowsToShow.length > 0;
+
+      if (useQ1DetailsFallback) {
+        const signedAcc = [0, 0, 0];
+        const forecastAcc = [0, 0, 0];
+
+        for (const row of q1DetailsView.rowsToShow) {
+          const monthRaw = q1DetailsView.monthCloseCol ? (row[q1DetailsView.monthCloseCol] ?? '') : '';
+          const monthIdx = parseMonthIndex(String(monthRaw));
+          if (monthIdx == null) continue;
+
+          let value = 0;
+          if (projectionMetric === 'clientWins') {
+            value = 1;
+          } else if (projectionMetric === 'acv') {
+            const acvRaw = q1DetailsView.acvCol ? (row[q1DetailsView.acvCol] ?? '') : '';
+            const weightedRaw = q1DetailsView.weightedAcvCol ? (row[q1DetailsView.weightedAcvCol] ?? '') : '';
+            value = parseCompactNumber(String(acvRaw)) || parseCompactNumber(String(weightedRaw));
+          } else {
+            const arrRaw = q1DetailsView.fy26ArrForecastCol ? (row[q1DetailsView.fy26ArrForecastCol] ?? '') : '';
+            value = parseCompactNumber(String(arrRaw));
+          }
+
+          if (!value) continue;
+          const statusRaw = q1DetailsView.statusCol ? (row[q1DetailsView.statusCol] ?? '') : '';
+          if (isSignedStatus(String(statusRaw))) signedAcc[monthIdx] += value;
+          else forecastAcc[monthIdx] += value;
+        }
+
+        monthSigned = signedAcc;
+        monthForecasted = forecastAcc;
+      } else {
+        for (let i = 0; i < 3; i++) {
+          const monthNum = monthNums[i];
+          const monthPrefix = `${year}-${String(monthNum).padStart(2, '0')}`;
+          const dealsInMonth = deals.filter((d) => d.closeDate.startsWith(monthPrefix));
+          let signed = 0;
+          let forecasted = 0;
+          for (const d of dealsInMonth) {
+            const v = getMetricFromDeal(d, projectionMetric);
+            if (d.closeDate <= asOfDate) signed += v;
+            else forecasted += v;
+          }
+          monthSigned.push(signed);
+          monthForecasted.push(forecasted);
+        }
       }
 
       if (selectedOwners.length > 0) {
@@ -300,6 +520,7 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
     getQuarterTargets,
     getQuarterTargetForSegments,
     getQuarterTargetForDealOwners,
+    q1DetailsView,
   ]);
 
   const formatProjectionValue = (value: number) =>
@@ -630,38 +851,8 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
         </div>
       </div>
 
-      {quarter === '2026Q1' && q1DetailsTable.length > 0 && (() => {
-        // Format header names with proper spacing and capitalization
-        const formatHeaderName = (key: string): string => {
-          return key
-            .replace(/_/g, ' ')
-            .replace(/\//g, ' / ')
-            .replace(/([a-z])([A-Z])/g, '$1 $2')
-            .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
-            .split(' ')
-            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-            .join(' ');
-        };
-
-        // Check if column is "Latest / Next Steps" (various sheet naming conventions)
-        const isLatestNextStepsColumn = (key: string): boolean => {
-          const n = key.toLowerCase().replace(/[\s_\/]+/g, '');
-          return (n.includes('latest') && (n.includes('nextstep') || n.includes('nextsteps'))) || n === 'latestnextsteps';
-        };
-
-        const allColumns = Object.keys(q1DetailsTable[0]);
-
-        // Find segment column (e.g. "segment", "Segment")
-        const segmentCol = allColumns.find(col => {
-          const n = col.toLowerCase().replace(/[\s_]+/g, '');
-          return n === 'segment';
-        });
-
-        // Find deal owner column (e.g. "deal owner", "deal_owner", "dealowner")
-        const dealOwnerCol = allColumns.find(col => {
-          const n = col.toLowerCase().replace(/[\s_]+/g, '');
-          return n === 'dealowner' || n === 'deal_owner' || (n.includes('deal') && n.includes('owner'));
-        });
+      {quarter === '2026Q1' && q1DetailsView && q1DetailsView.rowsToShow.length > 0 && (() => {
+        const { displayColumns, latestNextStepsCol, allColumns, rowsToShow, arrForecastColIndex } = q1DetailsView;
 
         // Check if a value is numeric
         const isNumeric = (value: string): boolean => {
@@ -677,68 +868,6 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
           if (isNaN(num)) return value;
           return num.toLocaleString('en-US');
         };
-
-        const displayColumns = allColumns.filter(col => !isLatestNextStepsColumn(col));
-        const latestNextStepsCol = allColumns.find(col => isLatestNextStepsColumn(col));
-
-        // Find the FY26ARRFORECAST column index for validation (among display columns)
-        const arrForecastColIndex = displayColumns.findIndex(col =>
-          col.toLowerCase().includes('fy26arrforecast') ||
-          col.toLowerCase().includes('arrforecast') ||
-          col.toLowerCase().includes('fy26arr')
-        );
-
-        // Filter out rows that look like headers or sub-headers
-        // Common sub-header patterns: "Y/N", "Latest / Next Steps", etc.
-        const subHeaderPatterns = [
-          'y/n', 'yes/no', 'latest', 'next steps', 'steps', 
-          'header', 'sub-header', 'subheader'
-        ];
-        
-        const filteredRows = q1DetailsTable.filter((row) => {
-          // Skip if it's likely a header row (values match column names)
-          const matchingColumns = allColumns.filter(col => {
-            const rowValue = (row[col] ?? '').toLowerCase().trim();
-            const colName = col.toLowerCase().trim();
-            return rowValue === colName || rowValue === formatHeaderName(col).toLowerCase().trim();
-          });
-
-          if (matchingColumns.length > allColumns.length * 0.5) {
-            return false;
-          }
-
-          const rowValues = allColumns.map(col => (row[col] ?? '').toLowerCase().trim()).join(' ');
-          const hasSubHeaderPattern = subHeaderPatterns.some(pattern =>
-            rowValues.includes(pattern)
-          );
-
-          if (hasSubHeaderPattern) {
-            const numericValues = allColumns.filter(col => {
-              const value = row[col] ?? '';
-              return isNumeric(value);
-            });
-            if (numericValues.length < allColumns.length * 0.2) {
-              return false;
-            }
-          }
-
-          return true;
-        });
-
-        // Apply segment and deal owner filters (same as waterfall)
-        let rowsToShow = filteredRows;
-        if (segmentCol && selectedSegments.length > 0) {
-          rowsToShow = rowsToShow.filter(row => {
-            const val = (row[segmentCol] ?? '').trim();
-            return selectedSegments.includes(val);
-          });
-        }
-        if (dealOwnerCol && selectedOwners.length > 0) {
-          rowsToShow = rowsToShow.filter(row => {
-            const val = (row[dealOwnerCol] ?? '').trim();
-            return selectedOwners.includes(val);
-          });
-        }
 
         return (
           <div className="sales-accounts-table-wrap sales-chart-card">
