@@ -923,7 +923,7 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                               key={key}
                               className="sales-q1-details-td"
                               style={{
-                                textAlign: isNumeric(value) && !value.includes('%') ? 'right' : 'left',
+                                textAlign: 'center',
                                 backgroundColor: mightBeMisaligned ? 'rgba(255, 200, 0, 0.1)' : 'transparent',
                               }}
                               title={mightBeMisaligned ? 'This value might be misaligned' : undefined}
@@ -958,14 +958,14 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                               return sum;
                             }, 0);
                             return (
-                              <td key={key} className="sales-q1-details-td" style={{ fontWeight: 700, textAlign: 'right' }}>
+                              <td key={key} className="sales-q1-details-td" style={{ fontWeight: 700, textAlign: 'center' }}>
                                 {formatNumber(total.toString())}
                               </td>
                             );
                           }
                           const isFirstColumn = colIndex === 0;
                           return (
-                            <td key={key} className="sales-q1-details-td" style={{ fontWeight: 700, textAlign: isFirstColumn ? 'right' : 'left' }}>
+                            <td key={key} className="sales-q1-details-td" style={{ fontWeight: 700, textAlign: 'center' }}>
                               {isFirstColumn ? 'Total' : ''}
                             </td>
                           );
