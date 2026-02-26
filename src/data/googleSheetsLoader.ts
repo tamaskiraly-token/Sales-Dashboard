@@ -141,7 +141,7 @@ function cell(row: Record<string, string>, key: string): string {
 /** Month column names by quarter: Q1=Jan,Feb,Mar; Q2=Apr,May,Jun; Q3=Jul,Aug,Sep; Q4=Oct,Nov,Dec. Also try "month1"/"month2"/"month3". */
 const QUARTER_MONTH_KEYS: Record<string, [string, string, string][]> = {
   '2026Q1': [['month1', 'jan', 'january'], ['month2', 'feb', 'february'], ['month3', 'mar', 'march']],
-  '2026Q2': [['month1', 'apr', 'april'], ['month2', 'may'], ['month3', 'jun', 'june']],
+  '2026Q2': [['month1', 'apr', 'april'], ['month2', 'may', 'may'], ['month3', 'jun', 'june']],
   '2026Q3': [['month1', 'jul', 'july'], ['month2', 'aug', 'august'], ['month3', 'sep', 'september']],
   '2026Q4': [['month1', 'oct', 'october'], ['month2', 'nov', 'november'], ['month3', 'dec', 'december']],
 };

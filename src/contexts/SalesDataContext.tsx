@@ -263,12 +263,13 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
       const sumFromByOwner = (metric: 'clientWins' | 'acv' | 'inYearRevenue' | 'arrTarget') =>
         byOwner ? Object.values(byOwner[metric] ?? {}).reduce((a, v) => a + v, 0) : 0;
 
-      if (fromSheet && (fromSheet.clientWins > 0 || fromSheet.acv > 0 || fromSheet.inYearRevenue > 0 || (fromSheet as { arrTarget?: number }).arrTarget > 0)) {
-        const sheetArrTarget = (fromSheet as { arrTarget?: number }).arrTarget ?? 0;
+      if (fromSheet && (fromSheet.clientWins > 0 || fromSheet.acv > 0 || fromSheet.inYearRevenue > 0 || ((fromSheet as { arrTarget?: number }).arrTarget ?? 0) > 0)) {
+        const sheet = fromSheet;
+        const sheetArrTarget = (sheet as { arrTarget?: number }).arrTarget ?? 0;
         return {
-          clientWins: fromSheet.clientWins,
-          acv: fromSheet.acv,
-          inYearRevenue: fromSheet.inYearRevenue,
+          clientWins: sheet.clientWins,
+          acv: sheet.acv,
+          inYearRevenue: sheet.inYearRevenue,
           arrTarget: sheetArrTarget > 0 ? sheetArrTarget : sumFromByOwner('arrTarget'),
         };
       }

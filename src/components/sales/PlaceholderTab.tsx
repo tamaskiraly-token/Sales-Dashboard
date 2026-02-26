@@ -5,6 +5,7 @@ const LABELS: Record<SalesTabId, string> = {
   forecast: 'Forecast',
   pipeline: 'Pipeline',
   accounts: 'Accounts',
+  lostdeals: 'Lost Deals',
   '2026q1': '2026 Q1',
   '2026q2': '2026 Q2',
   '2026q3': '2026 Q3',

@@ -22,8 +22,7 @@ type LostDealRow = {
 
 function filterDataRows<T extends Record<string, string>>(
   table: T[],
-  allColumns: string[],
-  isHeaderRow: (row: T) => boolean
+  allColumns: string[]
 ): T[] {
   const subHeaderPatterns = ['y/n', 'yes/no', 'latest', 'next steps', 'steps', 'header', 'sub-header', 'subheader'];
   return table.filter((row) => {
@@ -56,7 +55,7 @@ export function LostDealsTab() {
 
     if (q1Table && q1Table.length > 0) {
       const allColumns = Object.keys(q1Table[0]);
-      const dataRows = filterDataRows(q1Table, allColumns, () => false);
+      const dataRows = filterDataRows(q1Table, allColumns);
       const confidenceCol = allColumns.find((col) => normalizeHeaderKey(col) === 'confidenceq1close');
       const dealNameCol = allColumns.find((col) => normalizeHeaderKey(col) === 'q1pipeline')
         ?? allColumns.find((col) => normalizeHeaderKey(col) === 'dealname')
@@ -88,7 +87,7 @@ export function LostDealsTab() {
 
     if (q2Table && q2Table.length > 0) {
       const allColumns = Object.keys(q2Table[0]);
-      const dataRows = filterDataRows(q2Table, allColumns, () => false);
+      const dataRows = filterDataRows(q2Table, allColumns);
       const confidenceCol = allColumns.find((col) => normalizeHeaderKey(col) === 'confidenceq2close');
       const dealNameCol = allColumns.find((col) => normalizeHeaderKey(col) === 'q1pipeline')
         ?? allColumns.find((col) => { const n = normalizeHeaderKey(col); return n === 'q2pipeline' || (n.includes('q2') && n.includes('pipeline')); })
