@@ -1307,7 +1307,11 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
       </div>
 
       {quarter === '2026Q1' && q1DetailsView && q1DetailsView.rowsToShow.length > 0 && (() => {
-        const { displayColumns, latestNextStepsCol, allColumns, rowsToShow, arrForecastColIndex, confidenceCol } = q1DetailsView;
+        const { displayColumns, latestNextStepsCol, allColumns, rowsToShow, arrForecastColIndex, confidenceCol, statusCol } = q1DetailsView;
+        const isSignedStatus = (raw: string): boolean => {
+          const s = String(raw ?? '').toLowerCase().replace(/\s+/g, '');
+          return s.includes('signed') || s.includes('closedwon') || (s.includes('closed') && s.includes('won')) || s === 'won';
+        };
         const parseConfidence = (raw: string): number => {
           const s = String(raw ?? '').trim().replace(/%/g, '');
           if (!s) return 0;
@@ -1355,6 +1359,7 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                     }
                     const confidenceVal = confidenceCol ? parseConfidence(String(row[confidenceCol] ?? '')) : null;
                     const isLostDeal = confidenceVal !== null && confidenceVal === 0;
+                    const isSigned = statusCol ? isSignedStatus(String(row[statusCol] ?? '')) : false;
 
                     if (arrForecastColIndex >= 0 && i < 3) {
                       const arrForecastKey = displayColumns[arrForecastColIndex];
@@ -1368,10 +1373,10 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                     return (
                       <tr
                         key={i}
-                        className={`sales-q1-details-row${isLostDeal ? ' sales-details-row-lost' : ''}`}
+                        className={`sales-q1-details-row${isLostDeal ? ' sales-details-row-lost' : ''}${isSigned ? ' sales-details-row-signed' : ''}`}
                         onClick={() => setNextStepsModalContent(nextStepsValue)}
                         style={{ cursor: 'pointer' }}
-                        title={isLostDeal ? 'Lost deal (0% confidence)' : 'Click to view Latest / Next Steps'}
+                        title={isLostDeal ? 'Lost deal (0% confidence)' : isSigned ? 'Signed' : 'Click to view Latest / Next Steps'}
                       >
                         {displayColumns.map((key, colIndex) => {
                           const value = (row[key] ?? '').toString().trim();
@@ -1444,7 +1449,11 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
       })()}
 
       {quarter === '2026Q2' && q2DetailsView && q2DetailsView.rowsToShow.length > 0 && (() => {
-        const { displayColumns, latestNextStepsCol, allColumns, rowsToShow, arrForecastColIndex, confidenceCol } = q2DetailsView;
+        const { displayColumns, latestNextStepsCol, allColumns, rowsToShow, arrForecastColIndex, confidenceCol, statusCol } = q2DetailsView;
+        const isSignedStatus = (raw: string): boolean => {
+          const s = String(raw ?? '').toLowerCase().replace(/\s+/g, '');
+          return s.includes('signed') || s.includes('closedwon') || (s.includes('closed') && s.includes('won')) || s === 'won';
+        };
         const parseConfidence = (raw: string): number => {
           const s = String(raw ?? '').trim().replace(/%/g, '');
           if (!s) return 0;
@@ -1490,6 +1499,7 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                     }
                     const confidenceVal = confidenceCol ? parseConfidence(String(row[confidenceCol] ?? '')) : null;
                     const isLostDeal = confidenceVal !== null && confidenceVal === 0;
+                    const isSigned = statusCol ? isSignedStatus(String(row[statusCol] ?? '')) : false;
 
                     if (arrForecastColIndex >= 0 && i < 3) {
                       const arrForecastKey = displayColumns[arrForecastColIndex];
@@ -1503,10 +1513,10 @@ export function QuarterTab({ tabId }: QuarterTabProps) {
                     return (
                       <tr
                         key={i}
-                        className={`sales-q1-details-row${isLostDeal ? ' sales-details-row-lost' : ''}`}
+                        className={`sales-q1-details-row${isLostDeal ? ' sales-details-row-lost' : ''}${isSigned ? ' sales-details-row-signed' : ''}`}
                         onClick={() => setNextStepsModalContent(nextStepsValue)}
                         style={{ cursor: 'pointer' }}
-                        title={isLostDeal ? 'Lost deal (0% confidence)' : 'Click to view Latest / Next Steps'}
+                        title={isLostDeal ? 'Lost deal (0% confidence)' : isSigned ? 'Signed' : 'Click to view Latest / Next Steps'}
                       >
                         {displayColumns.map((key, colIndex) => {
                           const value = (row[key] ?? '').toString().trim();

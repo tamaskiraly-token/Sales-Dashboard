@@ -944,6 +944,13 @@ html {
   background-color: rgba(220, 53, 69, 0.18);
 }
 
+.sales-details-row-signed {
+  background-color: rgba(25, 135, 84, 0.15);
+}
+.sales-details-row-signed:hover {
+  background-color: rgba(25, 135, 84, 0.22);
+}
+
 .sales-lost-deals-empty {
   padding: 24px 20px;
   color: var(--sales-text-secondary);
