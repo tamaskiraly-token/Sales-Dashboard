@@ -37,11 +37,11 @@ const DEFAULT_ANNUAL_TARGETS = {
 } as const;
 
 /** Quarter targets for quarter waterfall. Used when QuarterTargets sheet not provided. */
-const DEFAULT_QUARTER_TARGETS: Record<QuarterId, { clientWins: number; acv: number; inYearRevenue: number }> = {
-  '2026Q1': { clientWins: 10, acv: 600000, inYearRevenue: 550000 },
-  '2026Q2': { clientWins: 12, acv: 720000, inYearRevenue: 660000 },
-  '2026Q3': { clientWins: 14, acv: 840000, inYearRevenue: 770000 },
-  '2026Q4': { clientWins: 16, acv: 960000, inYearRevenue: 880000 },
+const DEFAULT_QUARTER_TARGETS: Record<QuarterId, { clientWins: number; acv: number; inYearRevenue: number; arrTarget: number }> = {
+  '2026Q1': { clientWins: 10, acv: 600000, inYearRevenue: 550000, arrTarget: 0 },
+  '2026Q2': { clientWins: 12, acv: 720000, inYearRevenue: 660000, arrTarget: 0 },
+  '2026Q3': { clientWins: 14, acv: 840000, inYearRevenue: 770000, arrTarget: 0 },
+  '2026Q4': { clientWins: 16, acv: 960000, inYearRevenue: 880000, arrTarget: 0 },
 };
 
 export type AnnualTargets = { acv: number; inYearRevenue: number; arrTarget: number; clientWins: number };
@@ -72,7 +72,7 @@ type SalesDataContextValue = {
   /** Annual targets for cumulative chart (from SalesKPIs sheet or defaults) */
   getAnnualTargets: () => AnnualTargets;
   /** Quarter targets for quarter tab waterfall (from QuarterTargets sheet or defaults) */
-  getQuarterTargets: (quarter: QuarterId) => { clientWins: number; acv: number; inYearRevenue: number };
+  getQuarterTargets: (quarter: QuarterId) => { clientWins: number; acv: number; inYearRevenue: number; arrTarget: number };
   /** Quarter target for selected segments only (from QuarterMetricInput Target rows). Use when segment filter is active. */
   getQuarterTargetForSegments: (quarter: QuarterId, metric: QuarterProjectionMetricKey, segments: string[]) => number;
   /** Quarter target for selected deal owners only (from QuarterMetricInput Target rows). Use when deal owner filter is active. */
@@ -91,6 +91,8 @@ type SalesDataContextValue = {
   getQuarterMetricInputForDealOwners: (quarter: QuarterId, metric: QuarterProjectionMetricKey, owners: string[]) => { monthSigned: number[]; monthForecasted: number[]; carryOver: number } | null;
   /** Q1 details table from Q1details sheet (for Q1 tab below waterfall). */
   getQ1DetailsTable: () => Record<string, string>[];
+  /** Q2 details table from Q2details sheet (for Q2 tab below waterfall). */
+  getQ2DetailsTable: () => Record<string, string>[];
   /** January details table from JanuaryDetails sheet (for pop-up when clicking January bars). */
   getJanuaryDetailsTable: () => Record<string, string>[];
   /** February details table from Febdetails sheet (for pop-up when clicking February bars). */
@@ -255,10 +257,29 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
   }, [googleData]);
 
   const getQuarterTargets = useCallback(
-    (quarter: QuarterId): { clientWins: number; acv: number; inYearRevenue: number } => {
+    (quarter: QuarterId): { clientWins: number; acv: number; inYearRevenue: number; arrTarget: number } => {
       const fromSheet = googleData?.quarterTargets?.[quarter];
-      if (fromSheet && (fromSheet.clientWins > 0 || fromSheet.acv > 0 || fromSheet.inYearRevenue > 0)) {
-        return fromSheet;
+      const byOwner = googleData?.quarterTargetByDealOwner?.[quarter];
+      const sumFromByOwner = (metric: 'clientWins' | 'acv' | 'inYearRevenue' | 'arrTarget') =>
+        byOwner ? Object.values(byOwner[metric] ?? {}).reduce((a, v) => a + v, 0) : 0;
+
+      if (fromSheet && (fromSheet.clientWins > 0 || fromSheet.acv > 0 || fromSheet.inYearRevenue > 0 || (fromSheet as { arrTarget?: number }).arrTarget > 0)) {
+        const sheetArrTarget = (fromSheet as { arrTarget?: number }).arrTarget ?? 0;
+        return {
+          clientWins: fromSheet.clientWins,
+          acv: fromSheet.acv,
+          inYearRevenue: fromSheet.inYearRevenue,
+          arrTarget: sheetArrTarget > 0 ? sheetArrTarget : sumFromByOwner('arrTarget'),
+        };
+      }
+      if (byOwner) {
+        const clientWins = sumFromByOwner('clientWins');
+        const acv = sumFromByOwner('acv');
+        const inYearRevenue = sumFromByOwner('inYearRevenue');
+        const arrTarget = sumFromByOwner('arrTarget');
+        if (clientWins > 0 || acv > 0 || inYearRevenue > 0 || arrTarget > 0) {
+          return { clientWins, acv, inYearRevenue, arrTarget };
+        }
       }
       return DEFAULT_QUARTER_TARGETS[quarter];
     },
@@ -267,15 +288,13 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
 
   const getQuarterTargetForSegments = useCallback(
     (quarter: QuarterId, metric: QuarterProjectionMetricKey, segments: string[]): number => {
-      if (segments.length === 0) {
+      const tFromQuarter = () => {
         const t = getQuarterTargets(quarter);
-        return metric === 'clientWins' ? t.clientWins : metric === 'acv' ? t.acv : t.inYearRevenue;
-      }
+        return metric === 'clientWins' ? t.clientWins : metric === 'acv' ? t.acv : metric === 'arrTarget' ? t.arrTarget : t.inYearRevenue;
+      };
+      if (segments.length === 0) return tFromQuarter();
       const bySegment = googleData?.quarterTargetBySegment?.[quarter]?.[metric];
-      if (!bySegment) {
-        const t = getQuarterTargets(quarter);
-        return metric === 'clientWins' ? t.clientWins : metric === 'acv' ? t.acv : t.inYearRevenue;
-      }
+      if (!bySegment) return tFromQuarter();
       let sum = 0;
       for (const seg of segments) {
         const trimmed = seg.trim();
@@ -289,15 +308,13 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
 
   const getQuarterTargetForDealOwners = useCallback(
     (quarter: QuarterId, metric: QuarterProjectionMetricKey, owners: string[]): number => {
-      if (owners.length === 0) {
+      const tFromQuarter = () => {
         const t = getQuarterTargets(quarter);
-        return metric === 'clientWins' ? t.clientWins : metric === 'acv' ? t.acv : t.inYearRevenue;
-      }
+        return metric === 'clientWins' ? t.clientWins : metric === 'acv' ? t.acv : metric === 'arrTarget' ? t.arrTarget : t.inYearRevenue;
+      };
+      if (owners.length === 0) return tFromQuarter();
       const byOwner = googleData?.quarterTargetByDealOwner?.[quarter]?.[metric];
-      if (!byOwner) {
-        const t = getQuarterTargets(quarter);
-        return metric === 'clientWins' ? t.clientWins : metric === 'acv' ? t.acv : t.inYearRevenue;
-      }
+      if (!byOwner) return tFromQuarter();
       let sum = 0;
       for (const owner of owners) {
         const trimmed = owner.trim();
@@ -413,6 +430,10 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
     return googleData?.q1DetailsTable ?? [];
   }, [googleData]);
 
+  const getQ2DetailsTable = useCallback((): Record<string, string>[] => {
+    return googleData?.q2DetailsTable ?? [];
+  }, [googleData]);
+
   const getJanuaryDetailsTable = useCallback((): Record<string, string>[] => {
     return googleData?.januaryDetailsTable ?? [];
   }, [googleData]);
@@ -454,6 +475,7 @@ export function SalesDataProvider({ children }: { children: ReactNode }) {
     getQuarterMetricInputForSegments,
     getQuarterMetricInputForDealOwners,
     getQ1DetailsTable,
+    getQ2DetailsTable,
     getJanuaryDetailsTable,
     getFebruaryDetailsTable,
     getMarchDetailsTable,

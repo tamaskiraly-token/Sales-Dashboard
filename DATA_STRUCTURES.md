@@ -393,6 +393,24 @@ interface QuarterDeal {
 
 If you don’t use a QuarterTargets sheet, the dashboard uses built-in default targets. Set the sheet’s GID in `googleSheetsConfig.sheetGids.QuarterTargets` to use your own.
 
+#### QuarterTargetsByDealOwner (optional – targets per deal owner)
+
+**Sheet GID:** Set in `googleSheetsConfig.sheetGids.QuarterTargetsByDealOwner` (e.g. `1634296560`).
+
+**Used by:** Quarter tab – Q1/Q2/Q3/Q4 targets (e.g. Q1 ACV signed = sum of all owners, or per-owner when filtered). When this sheet is loaded, the full quarter target is the sum of all deal owners; when you filter by deal owner, the target is the sum of selected owners.
+
+**Supported layout: Metric | Deal Owner | Q1 | Q2 | Q3 | Q4** (one row per metric per deal owner)
+
+| Column     | Description |
+|-----------|-------------|
+| Metric    | `Client wins` \| `ACV Signed` \| `In-year revenue` (optional). Rows with other metrics e.g. ARR target are ignored. |
+| Deal Owner| Deal owner name (e.g. Trevor, Giacomo, Michal, Cameron). |
+| Q1 … Q4   | Target value for that quarter (e.g. 55000, 74000). |
+
+Example: ACV Signed rows with Q1 column 55k, 74k, 84k, 10k, 72k → Q1 ACV signed target = $295k (no filter) or per-owner when filtered.
+
+Alternative layout (one row per quarter per owner): columns `quarter`, `deal_owner`, `clientWins`, `acv`, `inYearRevenue` is also supported. Deal owners from this sheet appear in the Quarter tab deal-owner filter dropdown.
+
 ---
 
 ### 5.2 Cumulative chart from sheet (optional)

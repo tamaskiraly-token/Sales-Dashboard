@@ -6,6 +6,7 @@ import { ForecastTab } from './components/sales/ForecastTab';
 import { PipelineTab } from './components/sales/PipelineTab';
 import { AccountsTab } from './components/sales/AccountsTab';
 import { QuarterTab } from './components/sales/QuarterTab';
+import { LostDealsTab } from './components/sales/LostDealsTab';
 
 function SalesDashboardApp() {
   const [activeTab, setActiveTab] = useState<SalesTabId>('overview');
@@ -20,6 +21,7 @@ function SalesDashboardApp() {
         {activeTab === 'forecast' && <ForecastTab />}
         {activeTab === 'pipeline' && <PipelineTab />}
         {activeTab === 'accounts' && <AccountsTab />}
+        {activeTab === 'lostdeals' && <LostDealsTab />}
         {activeTab === '2026q1' && <QuarterTab tabId="2026q1" />}
         {activeTab === '2026q2' && <QuarterTab tabId="2026q2" />}
         {activeTab === '2026q3' && <QuarterTab tabId="2026q3" />}

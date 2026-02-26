@@ -5,6 +5,7 @@ export type SalesTabId =
   | 'forecast'
   | 'pipeline'
   | 'accounts'
+  | 'lostdeals'
   | '2026q1'
   | '2026q2'
   | '2026q3'
@@ -15,6 +16,7 @@ const TABS: { id: SalesTabId; label: string }[] = [
   { id: 'forecast', label: 'Forecast' },
   { id: 'pipeline', label: 'Pipeline' },
   { id: 'accounts', label: 'Accounts' },
+  { id: 'lostdeals', label: 'Lost Deals' },
   { id: '2026q1', label: '2026 Q1' },
   { id: '2026q2', label: '2026 Q2' },
   { id: '2026q3', label: '2026 Q3' },

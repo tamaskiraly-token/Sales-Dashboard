@@ -1,100 +1,45 @@
-import { useMemo } from 'react';
+/** Row shape for the month details pop-up: Deal Name (Q1 Pipeline), Forecasted Month, Segment, Deal Owner, Status, Weighted ACV, FY26 ARR. */
+export type MonthDealRow = {
+  dealName: string;
+  forecastedMonth: string;
+  segment: string;
+  dealOwner: string;
+  status: string;
+  weightedAcv: number;
+  fy26Arr: number;
+};
+
+type MonthKey = 'Jan' | 'Feb' | 'Mar' | 'Apr' | 'May' | 'Jun';
 
 interface MonthDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  data: Record<string, string>[];
-  month: 'Jan' | 'Feb' | 'Mar';
+  rows: MonthDealRow[];
+  month: MonthKey;
 }
 
-/** Format header name with proper spacing (e.g., "CLIENTNAME" -> "Client Name", "ACV($)" -> "ACV ($)") */
-function formatHeaderName(key: string): string {
-  // Handle special cases first
-  if (key.toLowerCase().includes('acv')) {
-    // Preserve ACV as uppercase
-    return key
-      .replace(/_/g, ' ')
-      .replace(/acv/gi, 'ACV')
-      .replace(/([A-Z])([A-Z]+)/g, '$1 $2') // Split consecutive capitals
-      .replace(/([a-z])([A-Z])/g, '$1 $2') // Add space before capital after lowercase
-      .replace(/\s+/g, ' ')
-      .trim()
-      .split(' ')
-      .map(word => {
-        if (word.toUpperCase() === 'ACV') return 'ACV';
-        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-      })
-      .join(' ');
-  }
-  
-  // General case: split on capitals and underscores
-  return key
-    .replace(/_/g, ' ')
-    .replace(/([a-z])([A-Z])/g, '$1 $2') // Add space before capital after lowercase
-    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2') // Split consecutive capitals followed by lowercase
-    .replace(/\s+/g, ' ')
-    .trim()
-    .split(' ')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
+function formatCurrency(value: number): string {
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `$${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  return `$${value}`;
 }
 
-/** Check if a value is numeric */
-function isNumeric(value: string): boolean {
-  if (!value || value.trim() === '') return false;
-  // Remove common formatting characters and check if it's a number
-  const cleaned = value.replace(/[,$]/g, '').trim();
-  return !isNaN(Number(cleaned)) && cleaned !== '';
-}
-
-/** Format number with thousands separator */
-function formatNumber(value: string): string {
-  if (!value || value.trim() === '') return '';
-  const num = parseFloat(value.replace(/[,$]/g, ''));
-  if (isNaN(num)) return value;
-  return num.toLocaleString('en-US');
-}
-
-/** Get custom display name for a column */
-function getColumnDisplayName(key: string): string {
-  const normalized = key.toLowerCase().replace(/[\s_]+/g, '').replace(/[()$]/g, '');
-  const originalKey = key.toLowerCase();
-  
-  // Custom mappings for specific columns
-  if (normalized.includes('acv') && !normalized.includes('inyear')) {
-    return 'ACV ($)';
-  }
-  if (normalized.includes('expected') && (normalized.includes('month') || normalized.includes('transaction'))) {
-    return 'Expected monthly transactions';
-  }
-  if (normalized.includes('inyear') || normalized.includes('in-year') || normalized.includes('inyearrevenue')) {
-    return 'In-year revenue ($)';
-  }
-  // Check for Commitment Status with various formats
-  const hasCommitment = normalized.includes('commitment') || normalized.includes('commit') || originalKey.includes('commitment') || originalKey.includes('commit');
-  const hasStatus = normalized.includes('status') || normalized.includes('stat') || originalKey.includes('status') || originalKey.includes('stat');
-  if (hasCommitment && hasStatus) {
-    return 'Commitment Status';
-  }
-  
-  // Default formatting for other columns
-  return formatHeaderName(key);
-}
-
-/** Columns are shown as-is from the sheet; no filtering by metric */
-
+/** Pop-up when clicking a month bar: shows deals for that month with Deal Name, Forecasted Month, Segment, Deal Owner, Weighted ACV, FY26 ARR. Respects segment and deal owner filters. */
 export function MonthDetailsModal({
   isOpen,
   onClose,
-  data,
+  rows,
   month,
 }: MonthDetailsModalProps) {
-  const tableData = useMemo(() => {
-    if (!data || data.length === 0) return [];
-    return data;
-  }, [data]);
-
   if (!isOpen) return null;
+
+  const monthLabels: Record<MonthKey, string> = {
+    Jan: 'January', Feb: 'February', Mar: 'March',
+    Apr: 'April', May: 'May', Jun: 'June',
+  };
+  const monthLabel = monthLabels[month];
+  const totalWeightedAcv = rows.reduce((s, r) => s + r.weightedAcv, 0);
+  const totalFy26Arr = rows.reduce((s, r) => s + r.fy26Arr, 0);
 
   return (
     <div
@@ -147,7 +92,7 @@ export function MonthDetailsModal({
                 color: 'var(--sales-text)',
               }}
             >
-              {month === 'Jan' ? 'January' : month === 'Feb' ? 'February' : 'March'} Details
+              {monthLabel} – Deals
             </h2>
             <p
               style={{
@@ -156,11 +101,12 @@ export function MonthDetailsModal({
                 color: 'var(--sales-text-secondary)',
               }}
             >
-              Showing {tableData.length} row{tableData.length !== 1 ? 's' : ''}
+              Showing {rows.length} deal{rows.length !== 1 ? 's' : ''} (filtered by current Segment / Deal Owner)
             </p>
           </div>
           <button
             onClick={onClose}
+            type="button"
             style={{
               background: 'none',
               border: 'none',
@@ -188,7 +134,7 @@ export function MonthDetailsModal({
             padding: '24px',
           }}
         >
-          {tableData.length === 0 ? (
+          {rows.length === 0 ? (
             <div
               style={{
                 padding: '40px',
@@ -196,67 +142,39 @@ export function MonthDetailsModal({
                 textAlign: 'center',
               }}
             >
-              No data available for {month === 'Jan' ? 'January' : month === 'Feb' ? 'February' : 'March'}
+              No deals for {monthLabel} with the current filters.
             </div>
           ) : (
             <div className="sales-accounts-table-scroll">
               <table className="sales-accounts-table">
                 <thead>
                   <tr>
-                    {Object.keys(tableData[0]).map((key) => (
-                      <th key={key}>{getColumnDisplayName(key)}</th>
-                    ))}
+                    <th>Deal Name</th>
+                    <th>Forecasted Month</th>
+                    <th>Segment</th>
+                    <th>Deal Owner</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: 'right' }}>Weighted ACV</th>
+                    <th style={{ textAlign: 'right' }}>FY26 ARR</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {tableData.map((row, i) => (
+                  {rows.map((row, i) => (
                     <tr key={i}>
-                      {Object.keys(tableData[0]).map((key) => {
-                        const value = row[key] ?? '';
-                        return (
-                          <td key={key}>
-                            {isNumeric(value) ? formatNumber(value) : value}
-                          </td>
-                        );
-                      })}
+                      <td>{row.dealName || '—'}</td>
+                      <td>{row.forecastedMonth || '—'}</td>
+                      <td>{row.segment || '—'}</td>
+                      <td>{row.dealOwner || '—'}</td>
+                      <td>{row.status || '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{formatCurrency(row.weightedAcv)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatCurrency(row.fy26Arr)}</td>
                     </tr>
                   ))}
-                  {(() => {
-                    const columns = Object.keys(tableData[0]);
-                    const numericColumns = columns.filter(key => {
-                      return tableData.some(row => isNumeric(row[key] ?? ''));
-                    });
-
-                    if (numericColumns.length === 0) return null;
-
-                    return (
-                      <tr style={{ fontWeight: 700, backgroundColor: 'var(--sales-accent-soft)' }}>
-                        {columns.map((key) => {
-                          const isNumericCol = numericColumns.includes(key);
-                          if (isNumericCol) {
-                            const total = tableData.reduce((sum, row) => {
-                              const val = row[key] ?? '';
-                              if (isNumeric(val)) {
-                                return sum + parseFloat(val.replace(/[,$]/g, ''));
-                              }
-                              return sum;
-                            }, 0);
-                            return (
-                              <td key={key} style={{ fontWeight: 700 }}>
-                                {formatNumber(total.toString())}
-                              </td>
-                            );
-                          }
-                          const isFirstColumn = columns.indexOf(key) === 0;
-                          return (
-                            <td key={key} style={{ fontWeight: 700, textAlign: isFirstColumn ? 'right' : 'left' }}>
-                              {isFirstColumn ? 'Total' : ''}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })()}
+                  <tr style={{ fontWeight: 700, backgroundColor: 'var(--sales-accent-soft)' }}>
+                    <td colSpan={5} style={{ textAlign: 'right' }}>Total</td>
+                    <td style={{ textAlign: 'right' }}>{formatCurrency(totalWeightedAcv)}</td>
+                    <td style={{ textAlign: 'right' }}>{formatCurrency(totalFy26Arr)}</td>
+                  </tr>
                 </tbody>
               </table>
             </div>

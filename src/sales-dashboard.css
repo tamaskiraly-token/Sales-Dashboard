@@ -24,9 +24,17 @@
   --sales-target-line: #dc2626;
 }
 
+/* Prevent horizontal page scroll; keep layout within viewport */
+html {
+  overflow-x: hidden;
+}
+
 .sales-app {
   display: flex;
   min-height: 100vh;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
   background: var(--sales-bg);
   font-family: "DM Sans", ui-sans-serif, system-ui, sans-serif;
   color: var(--sales-text);
@@ -166,20 +174,19 @@
   flex: 1;
   margin-left: 260px;
   min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
   padding: 28px 32px 40px;
 }
 
+/* Small screens: top bar + hamburger so content gets full width and menu stays visible */
 @media (max-width: 900px) {
-  .sales-sidebar { width: 200px; }
-  .sales-main { margin-left: 200px; padding: 20px 16px; }
-}
-
-/* Mobile: top bar + hamburger drawer */
-@media (max-width: 768px) {
   .sales-app { flex-direction: column; }
 
   .sales-sidebar {
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
     height: auto;
     min-height: 56px;
     flex-direction: row;
@@ -261,6 +268,13 @@
 
   .sales-main {
     margin-left: 0;
+    padding: 20px 16px 32px;
+    padding-top: calc(56px + 20px);
+  }
+}
+
+@media (max-width: 768px) {
+  .sales-main {
     padding: 16px 12px 24px;
     padding-top: calc(56px + 16px);
   }
@@ -309,7 +323,9 @@
 
 /* ----- Overview ----- */
 .sales-overview {
+  width: 100%;
   max-width: 1200px;
+  min-width: 0;
 }
 
 /* ----- KPI cards ----- */
@@ -403,6 +419,7 @@
   box-shadow: var(--sales-shadow);
   border: 1px solid var(--sales-border);
   overflow: hidden;
+  min-width: 0;
 }
 
 .sales-chart-header {
@@ -823,6 +840,8 @@
 .sales-accounts-table-wrap {
   overflow: hidden;
   padding: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .sales-accounts-table-meta {
@@ -838,6 +857,9 @@
   overflow-y: auto;
   max-height: min(70vh, 520px);
   -webkit-overflow-scrolling: touch;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .sales-accounts-table {
@@ -880,12 +902,15 @@
   overflow-x: auto;
   overflow-y: auto;
   max-height: min(70vh, 480px);
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .sales-q1-details-table {
-  table-layout: fixed;
+  table-layout: auto;
   width: 100%;
-  min-width: fit-content;
+  min-width: 600px;
   font-size: 12px;
 }
 
@@ -909,6 +934,19 @@
 
 .sales-q1-details-row:hover {
   background: rgba(30, 27, 75, 0.06);
+}
+
+/* Lost deals (0% confidence): red tint in Q1/Q2 tables and Lost Deals tab */
+.sales-details-row-lost {
+  background-color: rgba(220, 53, 69, 0.12);
+}
+.sales-details-row-lost:hover {
+  background-color: rgba(220, 53, 69, 0.18);
+}
+
+.sales-lost-deals-empty {
+  padding: 24px 20px;
+  color: var(--sales-text-secondary);
 }
 
 .sales-accounts-cell-name {

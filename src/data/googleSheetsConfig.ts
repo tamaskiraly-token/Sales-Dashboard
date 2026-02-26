@@ -41,12 +41,16 @@ export const googleSheetsConfig = {
     QuarterDeal: '399575525',
     /** Optional: quarter targets (columns: quarter, clientWins, acv, inYearRevenue). Set GID to use. */
     QuarterTargets: '',
+    /** Optional: targets per deal owner (columns: quarter, deal_owner, clientWins, acv, inYearRevenue). Used for Quarter tab when filtering by deal owner. */
+    QuarterTargetsByDealOwner: '1634296560',
     /** Optional: cumulative chart (columns: metric, type, Jan..Dec). Rows: ACV/In-year rev/ARR/Client wins × Actual/Forecast/Target. */
     CumulativeChartData: '1352982034',
-    /** Optional: quarter metric × status input (quarter, metric, status, segment, deal_owner, carry_over, month1–3, total_projected, quarter_target). */
-    QuarterMetricInput: '1253132527',
+    /** Optional: quarter metric × status input (quarter, metric, status, segment, deal_owner, carry_over, month1–3, total_projected, quarter_target). Feeds the quarter waterfall. */
+    QuarterMetricInput: '1680111574',
     /** Optional: Q1 details table shown below the waterfall on the Q1 quarter tab. */
     Q1details: '522387402',
+    /** Optional: Q2 details table shown below the waterfall on the Q2 quarter tab. */
+    Q2details: '2096494291',
     /** Optional: January details table for pop-up when clicking January bars in waterfall. */
     JanuaryDetails: '2013802624',
     /** Optional: February details table for pop-up when clicking February bars in waterfall. */
