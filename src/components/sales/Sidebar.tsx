@@ -13,9 +13,6 @@ export type SalesTabId =
 
 const TABS: { id: SalesTabId; label: string }[] = [
   { id: 'overview', label: 'Overview' },
-  { id: 'forecast', label: 'Forecast' },
-  { id: 'pipeline', label: 'Pipeline' },
-  { id: 'accounts', label: 'Accounts' },
   { id: 'lostdeals', label: 'Lost Deals' },
   { id: '2026q1', label: '2026 Q1' },
   { id: '2026q2', label: '2026 Q2' },

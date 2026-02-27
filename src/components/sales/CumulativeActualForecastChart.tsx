@@ -158,6 +158,7 @@ export function CumulativeActualForecastChart() {
               ? 'Data from CumulativeChartData sheet. Target can be non-linear. Actual (solid) to latest period; Forecast (dashed) to Dec.'
               : 'Target line = cumulative annual target. Actual (solid) to latest period; Forecast (dashed) to Dec.'}
           </p>
+          <p className="sales-overview-wip">Work in progress</p>
         </div>
         <div className="sales-view-switch">
           <span className="sales-view-switch-label">Metric:</span>

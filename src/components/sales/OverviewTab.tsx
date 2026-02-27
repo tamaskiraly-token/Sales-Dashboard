@@ -140,6 +140,7 @@ export function OverviewTab() {
       <header className="sales-page-header">
         <h1 className="sales-page-title">Overview</h1>
         <p className="sales-page-subtitle">Sales performance and pipeline at a glance</p>
+        <p className="sales-overview-wip">Work in progress</p>
       </header>
 
       <div className="sales-accounts-filters sales-chart-card">

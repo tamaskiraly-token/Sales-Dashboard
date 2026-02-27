@@ -312,6 +312,14 @@ html {
   color: var(--sales-muted);
 }
 
+.sales-overview-wip {
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--sales-muted);
+  opacity: 0.9;
+}
+
 @media (max-width: 480px) {
   .sales-page-title {
     font-size: 22px;
